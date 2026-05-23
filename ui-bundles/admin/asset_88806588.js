@@ -1,6 +1,25 @@
 /* ============================================================
    MOCK DATA — Sentinel Super Admin Console
+   Patched: live-data shim. Fetches /api/admin/sentinel-bundle synchronously
+   and overrides the baked-in constants below. If the fetch fails, the
+   original mock values are used so the UI never breaks.
    ============================================================ */
+(function bootstrapLiveData() {
+  try {
+    var xhr = new XMLHttpRequest();
+    xhr.open('GET', '/api/admin/sentinel-bundle', false);
+    xhr.setRequestHeader('x-admin-id', localStorage.getItem('sentinel.adminId') || 'admin_root');
+    xhr.send(null);
+    if (xhr.status >= 200 && xhr.status < 300) {
+      window.__LIVE_ADMIN = JSON.parse(xhr.responseText);
+      console.info('[sentinel] loaded live data');
+    } else {
+      console.warn('[sentinel] live bundle request returned', xhr.status, '— using mock');
+    }
+  } catch (e) {
+    console.warn('[sentinel] live bundle fetch failed — using mock:', e.message);
+  }
+})();
 
 const PLATFORM_NAME = "Sentinel";
 
@@ -189,10 +208,24 @@ const fmtPct = (n, decimals = 1) => n.toFixed(decimals) + "%";
 const formatDate = (d) => new Date(d).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
 const daysAgo = (n) => `${n}d ago`;
 
-// expose on window
-Object.assign(window, {
-  PLATFORM_NAME, CLIENTS, REVENUE_TREND, CLIENT_BREAKDOWN, ACTIVITY_FEED,
-  PAYMENTS, OVERDUE, TICKETS, AUDIT_LOG, ADMIN_USERS, SERVICES, INCIDENTS,
-  AGENT_TEMPLATES, EARNINGS_MONTHLY, REVENUE_BY_PLAN, MRR_MOVEMENT, CLIENT_INVOICES,
-  fmtMoney, fmtMoneySigned, fmtAbbrev, fmtPct, formatDate, daysAgo,
-});
+// Merge live data over mock. Mock fields are kept as fallback when the
+// live response is missing a key — keeps the UI rendering even offline.
+(function applyLive() {
+  var live = window.__LIVE_ADMIN || {};
+  var base = {
+    PLATFORM_NAME: PLATFORM_NAME, CLIENTS: CLIENTS, REVENUE_TREND: REVENUE_TREND,
+    CLIENT_BREAKDOWN: CLIENT_BREAKDOWN, ACTIVITY_FEED: ACTIVITY_FEED,
+    PAYMENTS: PAYMENTS, OVERDUE: OVERDUE, TICKETS: TICKETS, AUDIT_LOG: AUDIT_LOG,
+    ADMIN_USERS: ADMIN_USERS, SERVICES: SERVICES, INCIDENTS: INCIDENTS,
+    AGENT_TEMPLATES: AGENT_TEMPLATES, EARNINGS_MONTHLY: EARNINGS_MONTHLY,
+    REVENUE_BY_PLAN: REVENUE_BY_PLAN, MRR_MOVEMENT: MRR_MOVEMENT,
+    CLIENT_INVOICES: CLIENT_INVOICES,
+  };
+  for (var k in base) {
+    var liveVal = live[k];
+    var hasLive = liveVal != null && (!Array.isArray(liveVal) || liveVal.length > 0);
+    window[k] = hasLive ? liveVal : base[k];
+  }
+  // helpers are always from this file
+  Object.assign(window, { fmtMoney: fmtMoney, fmtMoneySigned: fmtMoneySigned, fmtAbbrev: fmtAbbrev, fmtPct: fmtPct, formatDate: formatDate, daysAgo: daysAgo });
+})();

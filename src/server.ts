@@ -2,6 +2,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import cors from "@fastify/cors";
+import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
 import type {
@@ -75,6 +76,7 @@ import {
   replyAsClient,
   revokeApiKey,
 } from "./services/portal.js";
+import { getAetherBundle, getSentinelBundle } from "./services/bundle-shims.js";
 
 const agentTypeSchema = Type.Union([
   Type.Literal("sales"),
