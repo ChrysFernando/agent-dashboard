@@ -1,0 +1,1303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Aether · Client Portal</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #04070f;
+    --panel: #0a1226;
+    --panel-2: #0d172d;
+    --border: rgba(255, 255, 255, 0.08);
+    --border-strong: rgba(255, 255, 255, 0.15);
+    --text: #f4f7ff;
+    --muted: #8a93ab;
+    --accent: #00d4ff;
+    --accent2: #7b61ff;
+    --accent3: #00e5a0;
+    --danger: #ff6b6b;
+    --warn: #ffb454;
+    --ok: #00e5a0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-size: 14px;
+    min-height: 100vh;
+    display: flex;
+  }
+  button, input, select, textarea { font-family: inherit; font-size: inherit; }
+  button { cursor: pointer; }
+  a { color: var(--accent); text-decoration: none; }
+  /* ---------- Sidebar ---------- */
+  .sidebar {
+    width: 240px; min-width: 240px;
+    background: linear-gradient(180deg, #060a18 0%, #04070f 100%);
+    border-right: 1px solid var(--border);
+    padding: 22px 16px;
+    display: flex; flex-direction: column; gap: 4px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; padding: 0 8px 18px; border-bottom: 1px solid var(--border); margin-bottom: 14px; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2) 50%, var(--accent3));
+    display: grid; place-items: center;
+  }
+  .brand-mark::after { content: ""; width: 12px; height: 12px; border-radius: 50%; background: var(--panel); }
+  .brand-name { font-weight: 700; letter-spacing: -0.3px; }
+  .brand-name span { color: var(--accent); }
+  .nav-item {
+    background: transparent; border: none; color: var(--muted);
+    padding: 9px 12px; border-radius: 9px;
+    text-align: left; display: flex; align-items: center; gap: 10px;
+    font-size: 13.5px; font-weight: 500;
+  }
+  .nav-item:hover { background: rgba(255,255,255,0.04); color: var(--text); }
+  .nav-item.active { background: rgba(0, 212, 255, 0.12); color: var(--accent); }
+  .nav-section { font-size: 10px; letter-spacing: 1.5px; color: var(--muted); padding: 14px 12px 4px; text-transform: uppercase; }
+  .switcher { margin-top: auto; padding: 12px 8px; border-top: 1px solid var(--border); }
+  .switcher select {
+    width: 100%; background: var(--panel-2); color: var(--text);
+    border: 1px solid var(--border); border-radius: 8px; padding: 7px 8px;
+  }
+  .switcher .ws-name { font-weight: 600; font-size: 13px; margin-bottom: 4px; padding-left: 2px; }
+  .switcher .ws-meta { font-size: 11px; color: var(--muted); padding-left: 2px; margin-top: 4px; }
+
+  /* ---------- Main ---------- */
+  .main { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+  .topbar {
+    height: 56px; padding: 0 22px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid var(--border);
+    background: rgba(6, 10, 24, 0.85); backdrop-filter: blur(10px);
+    position: sticky; top: 0; z-index: 10;
+  }
+  .page-title { font-size: 16px; font-weight: 600; }
+  .topbar-actions { display: flex; gap: 8px; align-items: center; }
+  .btn {
+    background: rgba(255,255,255,0.06); color: var(--text);
+    border: 1px solid var(--border); border-radius: 9px;
+    padding: 7px 12px; font-weight: 600; font-size: 13px;
+    transition: background 0.12s ease, border-color 0.12s ease;
+  }
+  .btn:hover { background: rgba(255,255,255,0.1); border-color: var(--border-strong); }
+  .btn.primary { background: linear-gradient(135deg, var(--accent), var(--accent2)); border-color: transparent; color: #04070f; }
+  .btn.primary:hover { filter: brightness(1.1); }
+  .btn.danger { background: rgba(255, 107, 107, 0.15); border-color: rgba(255, 107, 107, 0.4); color: var(--danger); }
+  .btn.ghost { background: transparent; }
+  .btn.sm { padding: 5px 10px; font-size: 12px; }
+  .content { padding: 22px; overflow-y: auto; flex: 1; }
+
+  /* ---------- Page wrappers ---------- */
+  .page { display: none; }
+  .page.active { display: block; }
+  .grid { display: grid; gap: 16px; }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.cols-2 { grid-template-columns: repeat(2, 1fr); }
+  @media (max-width: 1100px) { .grid.cols-4 { grid-template-columns: repeat(2, 1fr); } .grid.cols-3 { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 720px) { .grid.cols-4, .grid.cols-3, .grid.cols-2 { grid-template-columns: 1fr; } }
+
+  .card {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 14px;
+    padding: 18px;
+  }
+  .card-title { font-size: 13px; color: var(--muted); margin-bottom: 8px; font-weight: 600; letter-spacing: 0.2px; }
+  .card-value { font-size: 24px; font-weight: 700; letter-spacing: -0.5px; }
+  .card-sub { font-size: 12px; color: var(--muted); margin-top: 4px; }
+  .card-section { margin-bottom: 22px; }
+  .card-section h3 { font-size: 15px; font-weight: 600; margin-bottom: 12px; display: flex; justify-content: space-between; align-items: center; }
+  .card-section h3 .right-action { font-size: 12px; color: var(--accent); cursor: pointer; }
+
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid var(--border); }
+  th { color: var(--muted); font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: 0.5px; }
+  tr:last-child td { border-bottom: none; }
+  .pill {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 2px 9px; border-radius: 999px; font-size: 11px; font-weight: 600;
+  }
+  .pill.live { background: rgba(0, 229, 160, 0.15); color: var(--ok); }
+  .pill.paused { background: rgba(255, 180, 84, 0.15); color: var(--warn); }
+  .pill.idle { background: rgba(138, 147, 171, 0.18); color: var(--muted); }
+  .pill.info { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+  .pill.warning { background: rgba(255, 180, 84, 0.15); color: var(--warn); }
+  .pill.critical { background: rgba(255, 107, 107, 0.18); color: var(--danger); }
+  .pill.high { background: rgba(255, 180, 84, 0.15); color: var(--warn); }
+  .pill.urgent { background: rgba(255, 107, 107, 0.18); color: var(--danger); }
+  .pill.low { background: rgba(138, 147, 171, 0.18); color: var(--muted); }
+  .pill.normal { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+  .pill.open { background: rgba(0, 212, 255, 0.15); color: var(--accent); }
+  .pill.pending { background: rgba(255, 180, 84, 0.15); color: var(--warn); }
+  .pill.resolved { background: rgba(0, 229, 160, 0.15); color: var(--ok); }
+  .pill.closed { background: rgba(138, 147, 171, 0.18); color: var(--muted); }
+  .pill.dot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+
+  /* ---------- Toolbar ---------- */
+  .toolbar { display: flex; gap: 8px; margin-bottom: 14px; align-items: center; flex-wrap: wrap; }
+  .toolbar input, .toolbar select {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 9px; padding: 7px 10px; min-width: 160px;
+  }
+  .toolbar input:focus, .toolbar select:focus { outline: none; border-color: var(--accent); }
+
+  /* ---------- Modal ---------- */
+  .modal-bg {
+    position: fixed; inset: 0; background: rgba(2, 6, 18, 0.75);
+    display: none; align-items: center; justify-content: center; z-index: 100;
+    backdrop-filter: blur(4px);
+  }
+  .modal-bg.active { display: flex; }
+  .modal {
+    background: var(--panel); border: 1px solid var(--border-strong); border-radius: 14px;
+    width: min(560px, 92vw); padding: 22px; max-height: 86vh; overflow-y: auto;
+  }
+  .modal h2 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+  .modal .sub { color: var(--muted); font-size: 13px; margin-bottom: 18px; }
+  .form-row { display: flex; flex-direction: column; gap: 4px; margin-bottom: 14px; }
+  .form-row label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.6px; font-weight: 600; }
+  .form-row input, .form-row select, .form-row textarea {
+    background: var(--panel-2); border: 1px solid var(--border);
+    color: var(--text); border-radius: 9px; padding: 9px 11px; width: 100%;
+  }
+  .form-row textarea { resize: vertical; min-height: 80px; }
+  .form-row .helper { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .form-actions { display: flex; gap: 8px; justify-content: flex-end; margin-top: 20px; }
+  .form-row.inline { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .checkboxes { display: flex; gap: 14px; flex-wrap: wrap; }
+  .checkboxes label { display: flex; align-items: center; gap: 6px; font-size: 13px; color: var(--text); text-transform: none; letter-spacing: 0; }
+
+  /* ---------- Drawer ---------- */
+  .drawer-bg { position: fixed; inset: 0; background: rgba(2, 6, 18, 0.6); display: none; z-index: 90; backdrop-filter: blur(3px); }
+  .drawer-bg.active { display: block; }
+  .drawer {
+    position: fixed; top: 0; right: 0; height: 100vh;
+    width: min(640px, 92vw); background: var(--panel);
+    border-left: 1px solid var(--border-strong);
+    display: none; flex-direction: column; z-index: 91;
+  }
+  .drawer.active { display: flex; }
+  .drawer-header { padding: 18px 22px; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center; }
+  .drawer-body { padding: 18px 22px; overflow-y: auto; flex: 1; }
+  .drawer-footer { padding: 14px 22px; border-top: 1px solid var(--border); display: flex; gap: 8px; justify-content: flex-end; }
+
+  .empty { text-align: center; padding: 28px 16px; color: var(--muted); font-size: 13px; }
+  .toast-stack { position: fixed; bottom: 18px; right: 18px; z-index: 200; display: flex; flex-direction: column; gap: 8px; }
+  .toast {
+    background: var(--panel); border: 1px solid var(--border-strong); padding: 10px 14px; border-radius: 9px;
+    font-size: 13px; max-width: 320px; box-shadow: 0 14px 40px rgba(0,0,0,0.45);
+  }
+  .toast.ok { border-color: rgba(0,229,160,0.5); }
+  .toast.err { border-color: rgba(255,107,107,0.5); }
+
+  /* ---------- Avatars / agents ---------- */
+  .avatar {
+    width: 34px; height: 34px; border-radius: 50%;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; color: #04070f; font-weight: 700; font-size: 13px;
+  }
+  .avatar.square { border-radius: 9px; }
+  .agent-row { display: flex; align-items: center; gap: 10px; }
+  .agent-name { font-weight: 600; }
+  .agent-type { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+
+  .progress { height: 6px; background: rgba(255,255,255,0.05); border-radius: 999px; overflow: hidden; }
+  .progress-fill { height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2)); }
+  .kv { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px dashed var(--border); }
+  .kv:last-child { border-bottom: none; }
+  .kv span:first-child { color: var(--muted); font-size: 12.5px; }
+  .kv span:last-child { font-weight: 600; }
+  code { background: rgba(255,255,255,0.06); padding: 1px 6px; border-radius: 5px; font-size: 12px; font-family: ui-monospace, monospace; }
+
+  .ann-banner { padding: 10px 16px; border-radius: 10px; background: rgba(0, 212, 255, 0.08); border: 1px solid rgba(0, 212, 255, 0.3); margin-bottom: 14px; display: flex; gap: 10px; align-items: center; justify-content: space-between; }
+  .ann-banner.warning { background: rgba(255, 180, 84, 0.08); border-color: rgba(255, 180, 84, 0.35); }
+  .ann-banner.critical { background: rgba(255, 107, 107, 0.08); border-color: rgba(255, 107, 107, 0.4); }
+
+  .feed-item { display: flex; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+  .feed-item:last-child { border-bottom: none; }
+  .feed-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); margin-top: 6px; flex-shrink: 0; }
+  .feed-dot.warn { background: var(--warn); }
+  .feed-dot.err { background: var(--danger); }
+  .feed-text { font-size: 13px; }
+  .feed-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+</style>
+</head>
+<body>
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="brand-mark"></div>
+      <div class="brand-name">Aether<span>.</span></div>
+    </div>
+    <button class="nav-item active" data-page="overview">📊 Overview</button>
+    <button class="nav-item" data-page="agents">🤖 Agents</button>
+    <button class="nav-item" data-page="knowledge">📚 Knowledge Base</button>
+    <button class="nav-item" data-page="transcripts">💬 Transcripts</button>
+    <button class="nav-item" data-page="analytics">📈 Analytics</button>
+    <button class="nav-item" data-page="billing">💳 Billing</button>
+    <div class="nav-section">Account</div>
+    <button class="nav-item" data-page="api-keys">🔑 API Keys</button>
+    <button class="nav-item" data-page="webhooks">🔌 Webhooks</button>
+    <button class="nav-item" data-page="team">👥 Team</button>
+    <button class="nav-item" data-page="support">🛟 Support</button>
+    <button class="nav-item" data-page="announcements">📣 Announcements</button>
+    <button class="nav-item" data-page="settings">⚙️ Settings</button>
+
+    <div class="switcher">
+      <div class="ws-name" id="wsName">—</div>
+      <select id="wsSelect"></select>
+      <div class="ws-meta" id="wsMeta">—</div>
+    </div>
+  </aside>
+
+  <main class="main">
+    <div class="topbar">
+      <div class="page-title" id="pageTitle">Overview</div>
+      <div class="topbar-actions">
+        <button class="btn ghost sm" id="refreshBtn" title="Refresh data">↻ Refresh</button>
+        <a class="btn sm" href="/docs" target="_blank">API Docs</a>
+        <a class="btn ghost sm" href="/admin">Admin →</a>
+      </div>
+    </div>
+
+    <div class="content">
+      <div id="annBannerHost"></div>
+
+      <!-- Overview -->
+      <section class="page active" data-page="overview">
+        <div class="grid cols-4" style="margin-bottom: 18px;">
+          <div class="card">
+            <div class="card-title">Total interactions (30d)</div>
+            <div class="card-value" id="kpiInteractions">—</div>
+            <div class="card-sub">Voice + WhatsApp</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Active agents</div>
+            <div class="card-value" id="kpiAgents">—</div>
+            <div class="card-sub" id="kpiAgentsSub">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Spend this month</div>
+            <div class="card-value" id="kpiSpend">—</div>
+            <div class="card-sub" id="kpiSpendSub">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Avg duration</div>
+            <div class="card-value" id="kpiDuration">—</div>
+            <div class="card-sub">All channels</div>
+          </div>
+        </div>
+
+        <div class="grid cols-2">
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Live agents</h3>
+            <div id="liveAgents" class="empty">Loading…</div>
+          </div>
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Live feed</h3>
+            <div id="liveFeed" class="empty">Loading…</div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Agents -->
+      <section class="page" data-page="agents">
+        <div class="toolbar">
+          <input id="agentSearch" placeholder="Search agents…" />
+          <select id="agentTypeFilter">
+            <option value="">All types</option>
+            <option value="sales">Sales</option>
+            <option value="support">Support</option>
+            <option value="booking">Booking</option>
+            <option value="coldcall">Cold call</option>
+          </select>
+          <select id="agentStatusFilter">
+            <option value="">All statuses</option>
+            <option value="live">Live</option>
+            <option value="paused">Paused</option>
+            <option value="idle">Idle</option>
+          </select>
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newAgentBtn">+ New Agent</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="agentsTable">
+            <thead><tr><th>Name</th><th>Type</th><th>Channels</th><th>Status</th><th>Calls today</th><th>Conversion</th><th>Actions</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Knowledge -->
+      <section class="page" data-page="knowledge">
+        <div class="toolbar">
+          <input id="kbSearch" placeholder="Search knowledge base…" />
+          <select id="kbTypeFilter">
+            <option value="">All types</option>
+            <option value="faq">FAQ</option>
+            <option value="script">Script</option>
+            <option value="product_info">Product info</option>
+            <option value="objection_handling">Objection handling</option>
+            <option value="pricing">Pricing</option>
+          </select>
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newKbBtn">+ New Document</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="kbTable">
+            <thead><tr><th>Title</th><th>Type</th><th>Tags</th><th>Updated</th><th>Agents</th><th>Actions</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Transcripts -->
+      <section class="page" data-page="transcripts">
+        <div class="toolbar">
+          <input id="trSearch" placeholder="Search transcript text…" />
+          <select id="trChannel">
+            <option value="">All channels</option>
+            <option value="voice">Voice</option>
+            <option value="whatsapp">WhatsApp</option>
+          </select>
+          <input id="trOutcome" placeholder="Outcome (e.g. converted)" />
+          <div style="flex:1"></div>
+          <button class="btn ghost sm" id="trReset">Reset</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="trTable">
+            <thead><tr><th>Started</th><th>Agent</th><th>Channel</th><th>Contact</th><th>Outcome</th><th>Sentiment</th><th>Duration</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Analytics -->
+      <section class="page" data-page="analytics">
+        <div class="grid cols-4" style="margin-bottom: 18px;">
+          <div class="card"><div class="card-title">Total interactions</div><div class="card-value" id="anTotal">—</div></div>
+          <div class="card"><div class="card-title">Overall conversion</div><div class="card-value" id="anConv">—</div></div>
+          <div class="card"><div class="card-title">Avg sentiment</div><div class="card-value" id="anSent">—</div></div>
+          <div class="card"><div class="card-title">Live coverage</div><div class="card-value" id="anLive">—</div></div>
+        </div>
+        <div class="grid cols-2">
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Segments</h3>
+            <div id="anSegments"></div>
+          </div>
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Script performance</h3>
+            <table id="scriptTable" style="font-size: 12px;">
+              <thead><tr><th>Script</th><th>Connect</th><th>Interest</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- Billing -->
+      <section class="page" data-page="billing">
+        <div class="grid cols-4" style="margin-bottom: 18px;">
+          <div class="card">
+            <div class="card-title">Plan</div>
+            <div class="card-value" id="planName">—</div>
+            <div class="card-sub" id="planFee">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Spend this month</div>
+            <div class="card-value" id="spendUsed">—</div>
+            <div class="progress" style="margin-top: 10px;"><div class="progress-fill" id="spendBar" style="width: 0%"></div></div>
+          </div>
+          <div class="card">
+            <div class="card-title">Budget remaining</div>
+            <div class="card-value" id="spendRem">—</div>
+            <div class="card-sub" id="spendRemSub">—</div>
+          </div>
+          <div class="card">
+            <div class="card-title">Invoiced (mtd)</div>
+            <div class="card-value" id="invTotal">—</div>
+          </div>
+        </div>
+        <div class="grid cols-2">
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Usage by agent</h3>
+            <table id="usageTable" style="font-size: 12.5px;">
+              <thead><tr><th>Agent</th><th>Type</th><th>Count</th><th>Duration</th><th>Cost</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="card">
+            <h3 style="margin-bottom: 12px;">Recent invoices</h3>
+            <table id="invoiceTable" style="font-size: 12.5px;">
+              <thead><tr><th>ID</th><th>Issued</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- API keys -->
+      <section class="page" data-page="api-keys">
+        <div class="toolbar">
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newKeyBtn">+ Generate API Key</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="keysTable">
+            <thead><tr><th>Label</th><th>Prefix</th><th>Scopes</th><th>Last used</th><th>Created</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Webhooks -->
+      <section class="page" data-page="webhooks">
+        <div class="toolbar">
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newWhBtn">+ New Endpoint</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="whTable">
+            <thead><tr><th>URL</th><th>Status</th><th>Events</th><th>Last delivery</th><th>Last test</th><th>Actions</th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Team -->
+      <section class="page" data-page="team">
+        <div class="toolbar">
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newTeamBtn">+ Invite Member</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="teamTable">
+            <thead><tr><th>Member</th><th>Email</th><th>Role</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Support -->
+      <section class="page" data-page="support">
+        <div class="toolbar">
+          <div style="flex:1"></div>
+          <button class="btn primary" id="newTicketBtn">+ Open Ticket</button>
+        </div>
+        <div class="card" style="padding: 0;">
+          <table id="ticketsTable">
+            <thead><tr><th>Subject</th><th>Status</th><th>Priority</th><th>Opened</th><th>Messages</th><th></th></tr></thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Announcements -->
+      <section class="page" data-page="announcements">
+        <div class="card" id="annList"><div class="empty">Loading…</div></div>
+      </section>
+
+      <!-- Settings -->
+      <section class="page" data-page="settings">
+        <div class="grid cols-2">
+          <div class="card">
+            <h3 style="margin-bottom: 14px;">Workspace profile</h3>
+            <form id="settingsForm">
+              <div class="form-row"><label>Workspace name</label><input name="name" /></div>
+              <div class="form-row"><label>Contact name</label><input name="contactName" /></div>
+              <div class="form-row"><label>Contact email</label><input name="contactEmail" type="email" /></div>
+              <div class="form-row"><label>Contact phone</label><input name="contactPhone" /></div>
+              <div class="form-row inline">
+                <div><label>Timezone</label><input name="timezone" /></div>
+                <div><label>Default language</label><input name="defaultLanguage" /></div>
+              </div>
+              <div class="form-row inline">
+                <div><label>Retention (days)</label><input name="retentionDays" type="number" /></div>
+                <div><label>Monthly budget ($)</label><input name="monthlyBudget" type="number" step="0.01" /></div>
+              </div>
+              <div class="form-actions"><button type="submit" class="btn primary">Save</button></div>
+            </form>
+          </div>
+          <div class="card">
+            <h3 style="margin-bottom: 14px;">Notification rules</h3>
+            <div id="notifList"></div>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Generic modal -->
+  <div class="modal-bg" id="modalBg">
+    <div class="modal" id="modalBody"></div>
+  </div>
+  <!-- Drawer for detail views -->
+  <div class="drawer-bg" id="drawerBg"></div>
+  <aside class="drawer" id="drawer">
+    <div class="drawer-header">
+      <div id="drawerTitle" style="font-weight: 700;">Detail</div>
+      <button class="btn ghost sm" onclick="closeDrawer()">Close</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+    <div class="drawer-footer" id="drawerFooter"></div>
+  </aside>
+  <div class="toast-stack" id="toastStack"></div>
+
+<script>
+  // ------------------------------------------------------------------
+  // Tiny client framework
+  // ------------------------------------------------------------------
+  const state = {
+    workspaceId: localStorage.getItem("portal:wsId") || "",
+    workspaces: [],
+    agents: [],
+    knowledgeBase: [],
+    transcripts: [],
+    settings: null,
+    billing: null,
+    analytics: null,
+    apiKeys: [],
+    tickets: [],
+    announcements: [],
+    overview: null,
+  };
+
+  const $ = (sel) => document.querySelector(sel);
+  const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const fmtMoney = (n) => "$" + Number(n || 0).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+
+  function toast(message, kind = "ok") {
+    const div = document.createElement("div");
+    div.className = "toast " + kind;
+    div.textContent = message;
+    $("#toastStack").appendChild(div);
+    setTimeout(() => div.remove(), 4000);
+  }
+
+  async function api(path, opts = {}) {
+    const headers = { "content-type": "application/json", ...(opts.headers || {}) };
+    if (state.workspaceId) headers["x-workspace-id"] = state.workspaceId;
+    const res = await fetch(path, { ...opts, headers });
+    if (!res.ok) {
+      let detail = "";
+      try { detail = (await res.json()).message; } catch {}
+      throw new Error(`${res.status} ${res.statusText} ${detail || ""}`);
+    }
+    if (res.status === 204) return null;
+    const ct = res.headers.get("content-type") || "";
+    return ct.includes("json") ? res.json() : res.text();
+  }
+
+  function openModal(html) {
+    $("#modalBody").innerHTML = html;
+    $("#modalBg").classList.add("active");
+  }
+  function closeModal() { $("#modalBg").classList.remove("active"); }
+  $("#modalBg").addEventListener("click", (e) => { if (e.target.id === "modalBg") closeModal(); });
+
+  function openDrawer(title, body, footer = "") {
+    $("#drawerTitle").textContent = title;
+    $("#drawerBody").innerHTML = body;
+    $("#drawerFooter").innerHTML = footer;
+    $("#drawerBg").classList.add("active");
+    $("#drawer").classList.add("active");
+  }
+  function closeDrawer() {
+    $("#drawerBg").classList.remove("active");
+    $("#drawer").classList.remove("active");
+  }
+  $("#drawerBg").addEventListener("click", closeDrawer);
+
+  // ------------------------------------------------------------------
+  // Navigation
+  // ------------------------------------------------------------------
+  function show(page) {
+    $$(".page").forEach((el) => el.classList.toggle("active", el.dataset.page === page));
+    $$(".nav-item").forEach((el) => el.classList.toggle("active", el.dataset.page === page));
+    const titles = { overview: "Overview", agents: "Agents", knowledge: "Knowledge Base", transcripts: "Transcripts", analytics: "Analytics", billing: "Billing", "api-keys": "API Keys", webhooks: "Webhooks", team: "Team", support: "Support", announcements: "Announcements", settings: "Settings" };
+    $("#pageTitle").textContent = titles[page] || page;
+    location.hash = page;
+    loadPage(page);
+  }
+  $$(".nav-item").forEach((el) => el.addEventListener("click", () => show(el.dataset.page)));
+
+  // ------------------------------------------------------------------
+  // Workspace switcher
+  // ------------------------------------------------------------------
+  async function loadWorkspaces() {
+    state.workspaces = await api("/api/portal/workspaces");
+    if (!state.workspaceId && state.workspaces.length) state.workspaceId = state.workspaces[0].id;
+    const sel = $("#wsSelect");
+    sel.innerHTML = state.workspaces.map((w) => `<option value="${w.id}" ${w.id === state.workspaceId ? "selected" : ""}>${w.name}</option>`).join("");
+    sel.onchange = () => {
+      state.workspaceId = sel.value;
+      localStorage.setItem("portal:wsId", state.workspaceId);
+      refreshAll();
+    };
+    await loadAccount();
+  }
+
+  async function loadAccount() {
+    try {
+      const account = await api("/api/portal/account");
+      $("#wsName").textContent = account.name;
+      $("#wsMeta").textContent = `${account.plan?.name ?? "—"} · ${account.status}`;
+      return account;
+    } catch (e) { toast("Failed to load account: " + e.message, "err"); }
+  }
+
+  // ------------------------------------------------------------------
+  // Announcement banner
+  // ------------------------------------------------------------------
+  async function loadAnnouncementBanner() {
+    try {
+      const anns = await api("/api/portal/announcements");
+      state.announcements = anns;
+      const unack = anns.filter((a) => !a.acknowledgedAt)[0];
+      const host = $("#annBannerHost");
+      host.innerHTML = "";
+      if (unack) {
+        host.innerHTML = `<div class="ann-banner ${unack.severity}"><div><strong>${unack.title}</strong> · ${unack.publishedLabel}<div style="color: var(--muted); font-size: 12.5px; margin-top: 2px;">${unack.body}</div></div><button class="btn sm" data-ack="${unack.id}">Acknowledge</button></div>`;
+        host.querySelector("[data-ack]").onclick = async () => {
+          await api(`/api/portal/announcements/${unack.id}/ack`, { method: "POST" });
+          loadAnnouncementBanner();
+        };
+      }
+    } catch {}
+  }
+
+  // ------------------------------------------------------------------
+  // Overview
+  // ------------------------------------------------------------------
+  async function loadOverview() {
+    const o = await api("/api/overview");
+    state.overview = o;
+    $("#kpiInteractions").textContent = (o.kpis.totalInteractions || 0).toLocaleString();
+    $("#kpiAgents").textContent = `${o.kpis.activeAgents.live}/${o.kpis.activeAgents.total}`;
+    $("#kpiAgentsSub").textContent = `${o.kpis.activeAgents.live} live now`;
+    $("#kpiSpend").textContent = fmtMoney(o.kpis.totalSpend);
+    $("#kpiSpendSub").textContent = `Budget ${fmtMoney(o.kpis.budget)}`;
+    $("#kpiDuration").textContent = o.kpis.avgDurationLabel;
+
+    $("#liveAgents").innerHTML = (o.agents || []).slice(0, 6).map((a) => `
+      <div class="agent-row" style="padding: 8px 0; border-bottom: 1px solid var(--border);">
+        <div class="avatar">${a.name.split(" ").map(s => s[0]).slice(0, 2).join("")}</div>
+        <div style="flex:1">
+          <div class="agent-name">${a.name}</div>
+          <div class="agent-type">${a.typeLabel} · ${a.channels.join(", ")}</div>
+        </div>
+        <span class="pill ${a.status} dot">${a.status}</span>
+      </div>`).join("") || `<div class="empty">No agents yet.</div>`;
+
+    $("#liveFeed").innerHTML = (o.liveFeed || []).slice(0, 10).map((f) => `
+      <div class="feed-item">
+        <div class="feed-dot ${f.severity === "error" ? "err" : f.severity === "warning" ? "warn" : ""}"></div>
+        <div style="flex:1">
+          <div class="feed-text">${f.summary}</div>
+          <div class="feed-meta">${f.agent?.name ?? "system"} · ${new Date(f.occurredAt).toLocaleTimeString()}</div>
+        </div>
+      </div>`).join("") || `<div class="empty">No events.</div>`;
+  }
+
+  // ------------------------------------------------------------------
+  // Agents
+  // ------------------------------------------------------------------
+  async function loadAgents() {
+    const agents = await api("/api/agents");
+    state.agents = agents;
+    renderAgentsTable();
+  }
+  function renderAgentsTable() {
+    const search = $("#agentSearch").value.toLowerCase();
+    const type = $("#agentTypeFilter").value;
+    const status = $("#agentStatusFilter").value;
+    const filtered = state.agents.filter((a) =>
+      (!search || a.name.toLowerCase().includes(search)) &&
+      (!type || a.type === type) &&
+      (!status || a.status === status),
+    );
+    $("#agentsTable tbody").innerHTML = filtered.map((a) => `
+      <tr>
+        <td><div class="agent-row"><div class="avatar">${a.name.split(" ").map(s => s[0]).slice(0,2).join("")}</div><div><div class="agent-name">${a.name}</div><div class="agent-type">${a.greeting ?? ""}</div></div></div></td>
+        <td>${a.typeLabel}</td>
+        <td>${a.channels.join(", ")}</td>
+        <td><span class="pill ${a.status} dot">${a.status}</span></td>
+        <td>${a.metrics.callsToday}</td>
+        <td>${a.metrics.conversionRate}%</td>
+        <td>
+          <button class="btn sm" data-toggle="${a.id}">${a.status === "live" ? "Pause" : "Activate"}</button>
+          <button class="btn sm" data-edit-agent="${a.id}">Edit</button>
+          <button class="btn sm danger" data-del-agent="${a.id}">Delete</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="7"><div class="empty">No agents match the filters.</div></td></tr>`;
+
+    $$("[data-toggle]").forEach((b) => b.onclick = async () => {
+      await api(`/api/agents/${b.dataset.toggle}/toggle`, { method: "POST", body: "{}" });
+      toast("Agent toggled");
+      loadAgents();
+    });
+    $$("[data-del-agent]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Delete this agent?")) return;
+      await api(`/api/agents/${b.dataset.delAgent}`, { method: "DELETE" });
+      toast("Agent deleted");
+      loadAgents();
+    });
+    $$("[data-edit-agent]").forEach((b) => b.onclick = () => agentForm(state.agents.find((a) => a.id === b.dataset.editAgent)));
+  }
+  ["agentSearch", "agentTypeFilter", "agentStatusFilter"].forEach((id) => $(`#${id}`).oninput = renderAgentsTable);
+  $("#newAgentBtn").onclick = () => agentForm();
+
+  function agentForm(agent) {
+    const isEdit = !!agent;
+    openModal(`
+      <h2>${isEdit ? "Edit agent" : "Create agent"}</h2>
+      <div class="sub">Configure persona, channels, and lifecycle.</div>
+      <form id="agentForm">
+        <div class="form-row"><label>Name</label><input name="name" required value="${agent?.name ?? ""}" /></div>
+        <div class="form-row inline">
+          <div><label>Type</label><select name="type">${["sales","support","booking","coldcall"].map(t => `<option value="${t}" ${agent?.type === t ? "selected" : ""}>${t}</option>`).join("")}</select></div>
+          <div><label>Status</label><select name="status">${["live","paused","idle"].map(s => `<option value="${s}" ${agent?.status === s ? "selected" : ""}>${s}</option>`).join("")}</select></div>
+        </div>
+        <div class="form-row"><label>Channels</label>
+          <div class="checkboxes">
+            <label><input type="checkbox" name="ch_voice" ${agent?.channels.includes("voice") ? "checked" : ""}/> Voice</label>
+            <label><input type="checkbox" name="ch_whatsapp" ${agent?.channels.includes("whatsapp") ? "checked" : ""}/> WhatsApp</label>
+          </div>
+        </div>
+        <div class="form-row inline">
+          <div><label>Language</label><input name="language" value="${agent?.language ?? ""}" /></div>
+          <div><label>Personality</label><input name="personality" value="${agent?.personality ?? ""}" /></div>
+        </div>
+        <div class="form-row"><label>Greeting</label><textarea name="greeting">${agent?.greeting ?? ""}</textarea></div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">${isEdit ? "Save" : "Create"}</button>
+        </div>
+      </form>`);
+    $("#agentForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const channels = ["voice","whatsapp"].filter((c) => fd.get("ch_" + c));
+      if (!channels.length) return toast("Select at least one channel", "err");
+      const body = {
+        name: fd.get("name"), type: fd.get("type"), status: fd.get("status"),
+        language: fd.get("language") || undefined, personality: fd.get("personality") || undefined,
+        greeting: fd.get("greeting") || undefined, channels,
+        workspaceId: state.workspaceId,
+      };
+      try {
+        if (isEdit) await api(`/api/agents/${agent.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        else await api("/api/agents", { method: "POST", body: JSON.stringify(body) });
+        closeModal(); toast(isEdit ? "Agent updated" : "Agent created"); loadAgents();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Knowledge Base
+  // ------------------------------------------------------------------
+  async function loadKb() {
+    const search = $("#kbSearch").value;
+    const type = $("#kbTypeFilter").value;
+    const params = new URLSearchParams();
+    if (search) params.set("search", search);
+    if (type) params.set("type", type);
+    const docs = await api(`/api/knowledge-base?${params}`);
+    state.knowledgeBase = docs;
+    $("#kbTable tbody").innerHTML = docs.map((d) => `
+      <tr>
+        <td><strong>${d.title}</strong></td>
+        <td>${d.type}</td>
+        <td>${(d.tags || []).map((t) => `<span class="pill normal">${t}</span>`).join(" ")}</td>
+        <td>${d.updatedLabel}</td>
+        <td>${d.agentCount}</td>
+        <td>
+          <button class="btn sm" data-edit-kb="${d.id}">Edit</button>
+          <button class="btn sm danger" data-del-kb="${d.id}">Delete</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6"><div class="empty">No documents.</div></td></tr>`;
+
+    $$("[data-edit-kb]").forEach((b) => b.onclick = async () => {
+      const d = await api(`/api/knowledge-base/${b.dataset.editKb}`);
+      kbForm(d);
+    });
+    $$("[data-del-kb]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Delete this document?")) return;
+      await api(`/api/knowledge-base/${b.dataset.delKb}`, { method: "DELETE" });
+      toast("Document deleted"); loadKb();
+    });
+  }
+  ["kbSearch", "kbTypeFilter"].forEach((id) => $(`#${id}`).oninput = loadKb);
+  $("#newKbBtn").onclick = () => kbForm();
+
+  function kbForm(doc) {
+    const isEdit = !!doc;
+    openModal(`
+      <h2>${isEdit ? "Edit document" : "New document"}</h2>
+      <div class="sub">Knowledge entries train agent responses.</div>
+      <form id="kbForm">
+        <div class="form-row"><label>Title</label><input name="title" required value="${doc?.title ?? ""}" /></div>
+        <div class="form-row"><label>Type</label>
+          <select name="type">${["faq","script","product_info","objection_handling","pricing"].map(t => `<option value="${t}" ${doc?.type === t ? "selected" : ""}>${t}</option>`).join("")}</select>
+        </div>
+        <div class="form-row"><label>Tags (comma separated)</label><input name="tags" value="${(doc?.tags || []).join(", ")}" /></div>
+        <div class="form-row"><label>Content</label><textarea name="content" required style="min-height:120px;">${doc?.content ?? ""}</textarea></div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">${isEdit ? "Save" : "Create"}</button>
+        </div>
+      </form>`);
+    $("#kbForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = {
+        title: fd.get("title"),
+        type: fd.get("type"),
+        content: fd.get("content"),
+        tags: String(fd.get("tags") || "").split(",").map(s => s.trim()).filter(Boolean),
+        workspaceId: state.workspaceId,
+      };
+      try {
+        if (isEdit) await api(`/api/knowledge-base/${doc.id}`, { method: "PUT", body: JSON.stringify(body) });
+        else await api(`/api/knowledge-base`, { method: "POST", body: JSON.stringify(body) });
+        closeModal(); toast(isEdit ? "Document saved" : "Document created"); loadKb();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Transcripts
+  // ------------------------------------------------------------------
+  async function loadTranscripts() {
+    const params = new URLSearchParams();
+    if ($("#trSearch").value) params.set("search", $("#trSearch").value);
+    if ($("#trChannel").value) params.set("channel", $("#trChannel").value);
+    if ($("#trOutcome").value) params.set("outcome", $("#trOutcome").value);
+    const list = await api(`/api/transcripts?${params}`);
+    state.transcripts = list;
+    $("#trTable tbody").innerHTML = list.map((t) => `
+      <tr data-tr="${t.id}" style="cursor:pointer">
+        <td>${new Date(t.startedAt).toLocaleString()}</td>
+        <td>${t.agentName}</td>
+        <td>${t.channel}</td>
+        <td>${t.contact}</td>
+        <td>${t.outcome ?? "—"}</td>
+        <td><span class="pill ${t.sentiment === "pos" ? "live" : t.sentiment === "neg" ? "critical" : "idle"}">${t.sentiment}</span></td>
+        <td>${t.durationLabel}</td>
+      </tr>`).join("") || `<tr><td colspan="7"><div class="empty">No transcripts.</div></td></tr>`;
+    $$("[data-tr]").forEach((row) => row.onclick = async () => {
+      const detail = await api(`/api/transcripts/${row.dataset.tr}`);
+      openDrawer(`Transcript · ${detail.agentName}`,
+        `<div class="kv"><span>Started</span><span>${new Date(detail.startedAt).toLocaleString()}</span></div>
+         <div class="kv"><span>Duration</span><span>${detail.durationLabel}</span></div>
+         <div class="kv"><span>Outcome</span><span>${detail.outcome ?? "—"}</span></div>
+         <div class="kv"><span>Sentiment</span><span>${detail.sentiment}</span></div>
+         <div class="kv"><span>Resolution</span><span>${detail.resolution ?? "—"}</span></div>
+         <hr style="border-color: var(--border); margin: 14px 0;" />
+         <h3 style="font-size: 14px; margin-bottom: 8px;">Transcript</h3>
+         ${detail.thread.map((entry) => `<div style="margin-bottom: 10px;"><strong>${entry.speaker}:</strong> ${entry.text}</div>`).join("")}`);
+    });
+  }
+  ["trSearch", "trChannel", "trOutcome"].forEach((id) => $(`#${id}`).oninput = loadTranscripts);
+  $("#trReset").onclick = () => { ["trSearch","trChannel","trOutcome"].forEach((id) => $(`#${id}`).value = ""); loadTranscripts(); };
+
+  // ------------------------------------------------------------------
+  // Analytics
+  // ------------------------------------------------------------------
+  async function loadAnalytics() {
+    const a = await api("/api/analytics");
+    state.analytics = a;
+    $("#anTotal").textContent = (a.shared.totalInteractions || 0).toLocaleString();
+    $("#anConv").textContent = (a.shared.overallConversionRate || 0) + "%";
+    $("#anSent").textContent = (a.shared.avgSentiment || 0).toFixed(2);
+    $("#anLive").textContent = a.shared.liveCoverageHours + "h";
+    const seg = a.segments;
+    $("#anSegments").innerHTML = `
+      <div class="kv"><span>Sales conversion</span><span>${seg.sales.conversionRate}%</span></div>
+      <div class="kv"><span>Sales revenue attributed</span><span>${fmtMoney(seg.sales.revenueAttributed)}</span></div>
+      <div class="kv"><span>Booking rate</span><span>${seg.booking.bookingsVsCalls}%</span></div>
+      <div class="kv"><span>Support FCR</span><span>${seg.support.firstCallResolution}%</span></div>
+      <div class="kv"><span>Cold connect</span><span>${seg.coldcall.connectRate}%</span></div>
+      <div class="kv"><span>Cold interest</span><span>${seg.coldcall.interestRate}%</span></div>`;
+    $("#scriptTable tbody").innerHTML = a.charts.scriptPerformance.map((s) => `
+      <tr><td>${s.name}</td><td>${s.connect}%</td><td>${s.interest}%</td></tr>`).join("");
+  }
+
+  // ------------------------------------------------------------------
+  // Billing
+  // ------------------------------------------------------------------
+  async function loadBilling() {
+    const b = await api("/api/billing");
+    state.billing = b;
+    $("#planName").textContent = b.currentPlan.name;
+    $("#planFee").textContent = fmtMoney(b.currentPlan.fee) + " / month";
+    $("#spendUsed").textContent = fmtMoney(b.threshold.used);
+    $("#spendRem").textContent = fmtMoney(b.threshold.remaining);
+    $("#spendRemSub").textContent = b.threshold.percentUsed + "% used";
+    $("#spendBar").style.width = Math.min(100, b.threshold.percentUsed) + "%";
+    $("#invTotal").textContent = fmtMoney(b.currentMonth.invoiceTotal);
+    $("#usageTable tbody").innerHTML = (b.usageRows || []).map((r) => `
+      <tr><td>${r.agentName ?? r.agent}</td><td>${r.typeLabel ?? r.type}</td><td>${r.interactionCount ?? r.count ?? "—"}</td><td>${r.durationLabel ?? r.dur ?? "—"}</td><td>${fmtMoney(r.totalCost ?? r.total ?? 0)}</td></tr>`).join("");
+    $("#invoiceTable tbody").innerHTML = (b.invoices || []).map((i) => `
+      <tr><td><code>${i.id}</code></td><td>${new Date(i.issuedAt).toLocaleDateString()}</td><td>${fmtMoney(i.amount)}</td><td><span class="pill ${i.status === "paid" ? "live" : "warning"}">${i.status}</span></td>
+      <td><a href="#" data-inv="${i.id}">Download</a></td></tr>`).join("");
+    $$("[data-inv]").forEach((a) => a.onclick = (e) => { e.preventDefault(); toast(`Invoice ${a.dataset.inv} prepared for download`); });
+  }
+
+  // ------------------------------------------------------------------
+  // API keys
+  // ------------------------------------------------------------------
+  async function loadKeys() {
+    const keys = await api("/api/portal/api-keys");
+    state.apiKeys = keys;
+    $("#keysTable tbody").innerHTML = keys.map((k) => `
+      <tr>
+        <td>${k.label}</td>
+        <td><code>${k.prefix}</code></td>
+        <td>${k.scopes.join(", ")}</td>
+        <td>${k.lastUsedLabel ?? "—"}</td>
+        <td>${new Date(k.createdAt).toLocaleDateString()}</td>
+        <td><button class="btn sm danger" data-revoke="${k.id}">Revoke</button></td>
+      </tr>`).join("") || `<tr><td colspan="6"><div class="empty">No active API keys.</div></td></tr>`;
+    $$("[data-revoke]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Revoke this key? The application using it will stop working.")) return;
+      await api(`/api/portal/api-keys/${b.dataset.revoke}`, { method: "DELETE" });
+      toast("Key revoked"); loadKeys();
+    });
+  }
+  $("#newKeyBtn").onclick = () => {
+    openModal(`
+      <h2>Generate API key</h2>
+      <div class="sub">Save the secret — it's shown only once.</div>
+      <form id="keyForm">
+        <div class="form-row"><label>Label</label><input name="label" required placeholder="e.g. production-server" /></div>
+        <div class="form-row"><label>Scopes</label>
+          <div class="checkboxes">
+            <label><input type="checkbox" name="read" checked /> read</label>
+            <label><input type="checkbox" name="write" checked /> write</label>
+            <label><input type="checkbox" name="admin" /> admin</label>
+          </div>
+        </div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">Generate</button>
+        </div>
+      </form>`);
+    $("#keyForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const scopes = ["read","write","admin"].filter((s) => fd.get(s));
+      try {
+        const out = await api("/api/portal/api-keys", { method: "POST", body: JSON.stringify({ label: fd.get("label"), scopes }) });
+        openModal(`<h2>Key generated</h2><div class="sub">Copy this now — it will not be shown again.</div>
+          <div style="background: var(--panel-2); padding: 12px; border-radius: 9px; word-break: break-all; font-family: ui-monospace, monospace; font-size: 13px;">${out.secret}</div>
+          <div class="form-actions"><button class="btn primary" onclick="closeModal()">Done</button></div>`);
+        loadKeys();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  };
+
+  // ------------------------------------------------------------------
+  // Webhooks
+  // ------------------------------------------------------------------
+  async function loadWebhooks() {
+    const settings = await api("/api/settings");
+    state.settings = settings;
+    $("#whTable tbody").innerHTML = (settings.webhooks || []).map((w) => `
+      <tr>
+        <td><code>${w.url}</code>${w.description ? `<div style="font-size:11px;color:var(--muted);margin-top:2px;">${w.description}</div>` : ""}</td>
+        <td><span class="pill ${w.status === "active" ? "live" : "idle"}">${w.status}</span></td>
+        <td>${(w.events || []).map((e) => `<span class="pill normal">${e}</span>`).join(" ")}</td>
+        <td>${w.lastDeliveryAt ? new Date(w.lastDeliveryAt).toLocaleString() : "—"}</td>
+        <td>${w.lastTestedAt ? new Date(w.lastTestedAt).toLocaleString() : "—"}</td>
+        <td>
+          <button class="btn sm" data-test-wh="${w.id}">Test</button>
+          <button class="btn sm" data-edit-wh="${w.id}">Edit</button>
+          <button class="btn sm danger" data-del-wh="${w.id}">Delete</button>
+        </td>
+      </tr>`).join("") || `<tr><td colspan="6"><div class="empty">No webhook endpoints.</div></td></tr>`;
+
+    $$("[data-test-wh]").forEach((b) => b.onclick = async () => {
+      try { await api(`/api/webhooks/endpoints/${b.dataset.testWh}/test`, { method: "POST" }); toast("Test event sent"); loadWebhooks(); }
+      catch (err) { toast(err.message, "err"); }
+    });
+    $$("[data-del-wh]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Delete this endpoint?")) return;
+      await api(`/api/webhooks/endpoints/${b.dataset.delWh}`, { method: "DELETE" });
+      toast("Endpoint deleted"); loadWebhooks();
+    });
+    $$("[data-edit-wh]").forEach((b) => b.onclick = () => webhookForm(state.settings.webhooks.find((w) => w.id === b.dataset.editWh)));
+  }
+  $("#newWhBtn").onclick = () => webhookForm();
+
+  function webhookForm(wh) {
+    const isEdit = !!wh;
+    openModal(`
+      <h2>${isEdit ? "Edit webhook" : "New webhook"}</h2>
+      <div class="sub">We POST signed events to your URL.</div>
+      <form id="whForm">
+        <div class="form-row"><label>URL</label><input name="url" type="url" required value="${wh?.url ?? ""}" /></div>
+        <div class="form-row"><label>Description</label><input name="description" value="${wh?.description ?? ""}" /></div>
+        <div class="form-row"><label>Secret (for signing)</label><input name="secret" placeholder="leave blank to keep" /></div>
+        <div class="form-row"><label>Events (comma separated)</label><input name="events" required value="${(wh?.events || []).join(",")}" placeholder="call.completed, agent.error" /></div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">${isEdit ? "Save" : "Create"}</button>
+        </div>
+      </form>`);
+    $("#whForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = {
+        url: fd.get("url"),
+        description: fd.get("description") || undefined,
+        secret: fd.get("secret") || undefined,
+        events: String(fd.get("events") || "").split(",").map(s => s.trim()).filter(Boolean),
+        workspaceId: state.workspaceId,
+      };
+      try {
+        if (isEdit) await api(`/api/webhooks/endpoints/${wh.id}`, { method: "PATCH", body: JSON.stringify(body) });
+        else await api(`/api/webhooks/endpoints`, { method: "POST", body: JSON.stringify(body) });
+        closeModal(); toast("Saved"); loadWebhooks();
+      } catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Team
+  // ------------------------------------------------------------------
+  async function loadTeam() {
+    const settings = await api("/api/settings");
+    state.settings = settings;
+    $("#teamTable tbody").innerHTML = (settings.team || []).map((m) => `
+      <tr>
+        <td><div class="agent-row"><div class="avatar" style="background:${m.color}">${m.initials}</div><div>${m.name}</div></div></td>
+        <td>${m.email}</td>
+        <td><span class="pill normal">${m.role}</span></td>
+        <td><button class="btn sm danger" data-del-team="${m.id}">Remove</button></td>
+      </tr>`).join("") || `<tr><td colspan="4"><div class="empty">No members.</div></td></tr>`;
+    $$("[data-del-team]").forEach((b) => b.onclick = async () => {
+      if (!confirm("Remove this team member?")) return;
+      await api(`/api/team/${b.dataset.delTeam}`, { method: "DELETE" });
+      toast("Removed"); loadTeam();
+    });
+  }
+  $("#newTeamBtn").onclick = () => {
+    openModal(`
+      <h2>Invite a member</h2>
+      <div class="sub">They'll receive an invite to join this workspace.</div>
+      <form id="teamForm">
+        <div class="form-row"><label>Name</label><input name="name" required /></div>
+        <div class="form-row"><label>Email</label><input name="email" type="email" required /></div>
+        <div class="form-row inline">
+          <div><label>Role</label><select name="role"><option>owner</option><option selected>admin</option><option>viewer</option></select></div>
+          <div><label>Initials</label><input name="initials" maxlength="3" required /></div>
+        </div>
+        <div class="form-row"><label>Color</label><input name="color" type="color" value="#7b61ff" /></div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">Invite</button>
+        </div>
+      </form>`);
+    $("#teamForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = Object.fromEntries(fd);
+      body.workspaceId = state.workspaceId;
+      try { await api("/api/team", { method: "POST", body: JSON.stringify(body) }); closeModal(); toast("Invited"); loadTeam(); }
+      catch (err) { toast(err.message, "err"); }
+    };
+  };
+
+  // ------------------------------------------------------------------
+  // Support
+  // ------------------------------------------------------------------
+  async function loadSupport() {
+    const tickets = await api("/api/portal/support/tickets");
+    state.tickets = tickets;
+    $("#ticketsTable tbody").innerHTML = tickets.map((t) => `
+      <tr data-ticket="${t.id}" style="cursor:pointer">
+        <td><strong>${t.subject}</strong><div style="font-size:11px;color:var(--muted);">${t.body.slice(0,72)}…</div></td>
+        <td><span class="pill ${t.status}">${t.status}</span></td>
+        <td><span class="pill ${t.priority}">${t.priority}</span></td>
+        <td>${t.createdLabel}</td>
+        <td>${t.messageCount}</td>
+        <td><button class="btn sm" data-open-ticket="${t.id}">Open</button></td>
+      </tr>`).join("") || `<tr><td colspan="6"><div class="empty">No tickets. Click + Open Ticket.</div></td></tr>`;
+    $$("[data-open-ticket]").forEach((b) => b.onclick = (e) => { e.stopPropagation(); openTicket(b.dataset.openTicket); });
+    $$("[data-ticket]").forEach((row) => row.onclick = () => openTicket(row.dataset.ticket));
+  }
+  $("#newTicketBtn").onclick = () => {
+    openModal(`
+      <h2>Open ticket</h2>
+      <div class="sub">Our support team will pick this up.</div>
+      <form id="ticketForm">
+        <div class="form-row"><label>Subject</label><input name="subject" required /></div>
+        <div class="form-row inline">
+          <div><label>Priority</label><select name="priority"><option>low</option><option selected>normal</option><option>high</option><option>urgent</option></select></div>
+          <div><label>Your email</label><input name="openedBy" type="email" /></div>
+        </div>
+        <div class="form-row"><label>Describe the issue</label><textarea name="body" required style="min-height:120px;"></textarea></div>
+        <div class="form-actions">
+          <button type="button" class="btn ghost" onclick="closeModal()">Cancel</button>
+          <button type="submit" class="btn primary">Open ticket</button>
+        </div>
+      </form>`);
+    $("#ticketForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      const body = Object.fromEntries(fd);
+      try { await api("/api/portal/support/tickets", { method: "POST", body: JSON.stringify(body) }); closeModal(); toast("Ticket opened"); loadSupport(); }
+      catch (err) { toast(err.message, "err"); }
+    };
+  };
+  async function openTicket(id) {
+    const t = await api(`/api/portal/support/tickets/${id}`);
+    const messages = t.messages.map((m) => `
+      <div style="margin-bottom: 10px; padding: 10px; background: ${m.authorRole === "client" ? "rgba(0, 212, 255, 0.08)" : "rgba(255,255,255,0.04)"}; border-radius: 9px;">
+        <div style="font-size: 11px; color: var(--muted); margin-bottom: 4px;">${m.author} · ${m.createdLabel}</div>
+        <div>${m.body}</div>
+      </div>`).join("");
+    openDrawer(`Ticket · ${t.subject}`,
+      `<div class="kv"><span>Status</span><span><span class="pill ${t.status}">${t.status}</span></span></div>
+       <div class="kv"><span>Priority</span><span><span class="pill ${t.priority}">${t.priority}</span></span></div>
+       <div class="kv"><span>Opened</span><span>${new Date(t.createdAt).toLocaleString()}</span></div>
+       <hr style="border-color: var(--border); margin: 14px 0;" />
+       <div>${t.body}</div>
+       <hr style="border-color: var(--border); margin: 14px 0;" />
+       <h3 style="font-size: 13px; margin-bottom: 8px;">Conversation</h3>
+       ${messages || `<div class="empty">No replies yet.</div>`}
+       <form id="replyForm" style="margin-top:14px;">
+         <div class="form-row"><label>Reply</label><textarea name="body" required></textarea></div>
+         <div class="form-row"><label>From</label><input name="author" required value="${t.workspaceId ? "you@" + state.workspaceId : "you@portal"}" /></div>
+         <div class="form-actions"><button class="btn primary" type="submit">Send</button></div>
+       </form>`);
+    $("#replyForm").onsubmit = async (e) => {
+      e.preventDefault();
+      const fd = new FormData(e.target);
+      try { await api(`/api/portal/support/tickets/${id}/reply`, { method: "POST", body: JSON.stringify({ author: fd.get("author"), body: fd.get("body") }) }); openTicket(id); loadSupport(); }
+      catch (err) { toast(err.message, "err"); }
+    };
+  }
+
+  // ------------------------------------------------------------------
+  // Announcements
+  // ------------------------------------------------------------------
+  async function loadAnnouncements() {
+    const anns = await api("/api/portal/announcements");
+    $("#annList").innerHTML = anns.length ? anns.map((a) => `
+      <div style="padding: 14px 0; border-bottom: 1px solid var(--border);">
+        <div style="display:flex; justify-content: space-between; align-items: center;">
+          <strong>${a.title}</strong>
+          <span class="pill ${a.severity}">${a.severity}</span>
+        </div>
+        <div style="color: var(--muted); margin: 6px 0;">${a.publishedLabel}</div>
+        <div>${a.body}</div>
+        <div style="margin-top: 8px;">${a.acknowledgedAt
+          ? `<span class="pill resolved">Acknowledged ${new Date(a.acknowledgedAt).toLocaleString()}</span>`
+          : `<button class="btn sm" data-ack-ann="${a.id}">Acknowledge</button>`}</div>
+      </div>`).join("") : `<div class="empty">No announcements.</div>`;
+    $$("[data-ack-ann]").forEach((b) => b.onclick = async () => {
+      await api(`/api/portal/announcements/${b.dataset.ackAnn}/ack`, { method: "POST" });
+      loadAnnouncements(); loadAnnouncementBanner();
+    });
+  }
+
+  // ------------------------------------------------------------------
+  // Settings
+  // ------------------------------------------------------------------
+  async function loadSettings() {
+    const account = await api("/api/portal/account");
+    const f = $("#settingsForm");
+    f.name.value = account.name;
+    f.contactName.value = account.contactName ?? "";
+    f.contactEmail.value = account.contactEmail ?? "";
+    f.contactPhone.value = account.contactPhone ?? "";
+    f.timezone.value = account.timezone ?? "";
+    f.defaultLanguage.value = account.defaultLanguage ?? "";
+    f.retentionDays.value = account.retentionDays ?? "";
+    f.monthlyBudget.value = account.monthlyBudget ?? "";
+
+    const settings = await api("/api/settings");
+    $("#notifList").innerHTML = (settings.notifications || []).map((n) => `
+      <div style="padding: 10px 0; border-bottom: 1px solid var(--border); display: flex; justify-content: space-between; align-items: center;">
+        <div><strong>${n.eventType.replace(/_/g, " ")}</strong></div>
+        <div style="display:flex; gap: 12px;">
+          <label><input type="checkbox" ${n.emailEnabled ? "checked" : ""} data-notif="email" data-event="${n.eventType}"/> Email</label>
+          <label><input type="checkbox" ${n.webhookEnabled ? "checked" : ""} data-notif="webhook" data-event="${n.eventType}"/> Webhook</label>
+        </div>
+      </div>`).join("");
+    $$("[data-notif]").forEach((cb) => cb.onchange = async () => {
+      const event = cb.dataset.event;
+      const peers = $$("[data-event='" + event + "']");
+      const body = {
+        emailEnabled: peers.find((p) => p.dataset.notif === "email").checked,
+        webhookEnabled: peers.find((p) => p.dataset.notif === "webhook").checked,
+      };
+      try { await api(`/api/settings/notifications/${event}`, { method: "PUT", body: JSON.stringify(body) }); toast("Updated"); }
+      catch (err) { toast(err.message, "err"); }
+    });
+  }
+  $("#settingsForm").onsubmit = async (e) => {
+    e.preventDefault();
+    const fd = new FormData(e.target);
+    const body = {
+      name: fd.get("name"),
+      contactName: fd.get("contactName") || undefined,
+      contactEmail: fd.get("contactEmail") || undefined,
+      contactPhone: fd.get("contactPhone") || undefined,
+      timezone: fd.get("timezone") || undefined,
+      defaultLanguage: fd.get("defaultLanguage") || undefined,
+      retentionDays: fd.get("retentionDays") ? Number(fd.get("retentionDays")) : null,
+      monthlyBudgetCents: fd.get("monthlyBudget") ? Math.round(Number(fd.get("monthlyBudget")) * 100) : undefined,
+    };
+    try { await api("/api/portal/account", { method: "PATCH", body: JSON.stringify(body) }); toast("Settings saved"); loadWorkspaces(); }
+    catch (err) { toast(err.message, "err"); }
+  };
+
+  // ------------------------------------------------------------------
+  // Page loader
+  // ------------------------------------------------------------------
+  function loadPage(p) {
+    const map = {
+      overview: loadOverview,
+      agents: loadAgents,
+      knowledge: loadKb,
+      transcripts: loadTranscripts,
+      analytics: loadAnalytics,
+      billing: loadBilling,
+      "api-keys": loadKeys,
+      webhooks: loadWebhooks,
+      team: loadTeam,
+      support: loadSupport,
+      announcements: loadAnnouncements,
+      settings: loadSettings,
+    };
+    return (map[p] ?? loadOverview)().catch((err) => toast(err.message, "err"));
+  }
+
+  function refreshAll() {
+    loadAccount(); loadAnnouncementBanner();
+    const p = location.hash.replace("#","") || "overview";
+    show(p);
+  }
+  $("#refreshBtn").onclick = refreshAll;
+
+  // ------------------------------------------------------------------
+  // Boot
+  // ------------------------------------------------------------------
+  (async function boot() {
+    try {
+      await loadWorkspaces();
+      await loadAnnouncementBanner();
+      const initial = location.hash.replace("#","") || "overview";
+      show(initial);
+    } catch (e) {
+      toast("Boot failure: " + e.message, "err");
+    }
+  })();
+</script>
+</body>
+</html>

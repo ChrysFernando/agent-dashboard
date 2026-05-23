@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Aether · Agent Management Platform</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    --bg: #04070f;
+    --card: rgba(255, 255, 255, 0.04);
+    --card-border: rgba(255, 255, 255, 0.08);
+    --text: #f4f7ff;
+    --muted: #8a93ab;
+    --accent: #00d4ff;
+    --accent2: #7b61ff;
+    --accent3: #00e5a0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    background:
+      radial-gradient(60% 60% at 18% 20%, rgba(123, 97, 255, 0.45), transparent 70%),
+      radial-gradient(55% 55% at 82% 30%, rgba(0, 212, 255, 0.4), transparent 70%),
+      radial-gradient(55% 55% at 50% 100%, rgba(0, 229, 160, 0.3), transparent 70%),
+      var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 40px 20px;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 32px; }
+  .brand-mark {
+    width: 56px; height: 56px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2) 50%, var(--accent3));
+    display: grid; place-items: center;
+    box-shadow: 0 8px 32px rgba(0, 212, 255, 0.3);
+  }
+  .brand-mark::after {
+    content: ""; width: 22px; height: 22px;
+    border-radius: 50%; background: #0a1226;
+  }
+  h1 { font-size: 28px; font-weight: 700; letter-spacing: -0.5px; }
+  h1 span { color: var(--accent); }
+  .subtitle { color: var(--muted); font-size: 15px; margin-top: 6px; }
+  .grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 20px; max-width: 920px; width: 100%;
+  }
+  .tile {
+    background: var(--card);
+    border: 1px solid var(--card-border);
+    border-radius: 18px;
+    padding: 28px;
+    text-decoration: none;
+    color: var(--text);
+    transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+    display: flex; flex-direction: column; gap: 12px;
+    min-height: 180px;
+  }
+  .tile:hover { transform: translateY(-3px); border-color: rgba(0, 212, 255, 0.5); background: rgba(255,255,255,0.06); }
+  .tile-tag { font-size: 11px; letter-spacing: 1.5px; color: var(--accent); text-transform: uppercase; font-weight: 700; }
+  .tile h2 { font-size: 20px; font-weight: 600; }
+  .tile p { font-size: 13.5px; color: var(--muted); line-height: 1.5; }
+  .tile-cta { margin-top: auto; font-size: 13px; color: var(--accent); font-weight: 600; }
+  .footer-links {
+    margin-top: 36px; display: flex; gap: 18px;
+    font-size: 13px; color: var(--muted);
+  }
+  .footer-links a { color: var(--muted); text-decoration: none; }
+  .footer-links a:hover { color: var(--text); }
+</style>
+</head>
+<body>
+  <div class="brand">
+    <div class="brand-mark"></div>
+    <div>
+      <h1>Aether<span>.</span></h1>
+      <div class="subtitle">Agent management platform</div>
+    </div>
+  </div>
+
+  <div class="grid">
+    <a class="tile" href="/portal">
+      <span class="tile-tag">Client</span>
+      <h2>Client Portal</h2>
+      <p>Your agents, knowledge base, transcripts, billing, and account. Each client logs in here.</p>
+      <span class="tile-cta">Open portal →</span>
+    </a>
+    <a class="tile" href="/admin">
+      <span class="tile-tag">Operator</span>
+      <h2>Super Admin Console</h2>
+      <p>Manage clients, plans, announcements, support tickets, and platform-wide metrics.</p>
+      <span class="tile-cta">Open console →</span>
+    </a>
+    <a class="tile" href="/docs">
+      <span class="tile-tag">API</span>
+      <h2>Swagger Docs</h2>
+      <p>OpenAPI reference for every portal and admin endpoint. Try requests directly.</p>
+      <span class="tile-cta">Open docs →</span>
+    </a>
+  </div>
+
+  <div class="footer-links">
+    <a href="/preview/portal">Aether design preview</a>
+    <a href="/preview/admin">Sentinel design preview</a>
+    <a href="/health">Health</a>
+  </div>
+</body>
+</html>

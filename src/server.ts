@@ -1,9 +1,18 @@
 import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 
 import cors from "@fastify/cors";
 import swagger from "@fastify/swagger";
 import swaggerUi from "@fastify/swagger-ui";
-import type { NotificationEventType } from "@prisma/client";
+import type {
+  AdminRole,
+  AnnouncementAudience,
+  AnnouncementSeverity,
+  NotificationEventType,
+  SupportTicketPriority,
+  SupportTicketStatus,
+  WorkspaceStatus,
+} from "@prisma/client";
 import { Type, type Static } from "@sinclair/typebox";
 import { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify from "fastify";
@@ -26,6 +35,46 @@ import {
 } from "./services/dashboard.js";
 import { ingestAgentWebhook } from "./services/ingest.js";
 import { sendTestWebhook } from "./services/webhooks.js";
+import {
+  createClient,
+  createPlan,
+  deactivateAdmin,
+  deleteClient,
+  deletePlan,
+  getAuditLog,
+  getClient,
+  getGlobalMetrics,
+  getSupportTicket,
+  impersonateClient,
+  inviteAdmin,
+  listAdmins,
+  listAnnouncements,
+  listClients,
+  listPlans,
+  listSupportTickets,
+  publishAnnouncement,
+  replyToTicket,
+  retractAnnouncement,
+  setClientStatus,
+  updateAdmin,
+  updateClient,
+  updatePlan,
+  updateTicket,
+} from "./services/admin.js";
+import {
+  acknowledgeAnnouncement,
+  createApiKey,
+  getClientSupportTicket,
+  getPortalAccount,
+  getPortalUsage,
+  listAnnouncementsForWorkspace,
+  listApiKeys,
+  listClientSupportTickets,
+  listWorkspaces,
+  openSupportTicket,
+  replyAsClient,
+  revokeApiKey,
+} from "./services/portal.js";
 
 const agentTypeSchema = Type.Union([
   Type.Literal("sales"),
@@ -56,6 +105,48 @@ const notificationEventSchema = Type.Union([
   Type.Literal("spend_threshold"),
 ]);
 
+const workspaceStatusSchema = Type.Union([
+  Type.Literal("trial"),
+  Type.Literal("active"),
+  Type.Literal("suspended"),
+  Type.Literal("archived"),
+]);
+
+const adminRoleSchema = Type.Union([
+  Type.Literal("super_admin"),
+  Type.Literal("support"),
+  Type.Literal("billing"),
+  Type.Literal("read_only"),
+]);
+
+const announcementSeveritySchema = Type.Union([
+  Type.Literal("info"),
+  Type.Literal("warning"),
+  Type.Literal("critical"),
+]);
+
+const announcementAudienceSchema = Type.Union([
+  Type.Literal("all"),
+  Type.Literal("trial"),
+  Type.Literal("active"),
+  Type.Literal("suspended"),
+  Type.Literal("custom"),
+]);
+
+const ticketStatusSchema = Type.Union([
+  Type.Literal("open"),
+  Type.Literal("pending"),
+  Type.Literal("resolved"),
+  Type.Literal("closed"),
+]);
+
+const ticketPrioritySchema = Type.Union([
+  Type.Literal("low"),
+  Type.Literal("normal"),
+  Type.Literal("high"),
+  Type.Literal("urgent"),
+]);
+
 const app = Fastify({
   logger: true,
 }).withTypeProvider<TypeBoxTypeProvider>();
@@ -67,11 +158,32 @@ await app.register(cors, {
 await app.register(swagger, {
   openapi: {
     info: {
-      title: "Agent Dashboard API",
-      version: "1.0.0",
+      title: "Aether Agent Management API",
+      version: "2.0.0",
       description:
-        "Backend for the Aether-style agent dashboard: agents, transcripts, billing, analytics, knowledge base, and webhook ingestion.",
+        "Multi-tenant agent management platform. Client portal endpoints (`/api/*`, `/api/portal/*`) and Super Admin endpoints (`/api/admin/*`) drive the two UIs at `/portal` and `/admin`. Inbound webhooks under `/api/webhooks/*`.",
     },
+    tags: [
+      { name: "System", description: "Health, landing pages, and static assets." },
+      { name: "Dashboard", description: "Single-workspace dashboard data (Overview, Analytics)." },
+      { name: "Agents", description: "Per-agent CRUD and lifecycle." },
+      { name: "Knowledge Base", description: "Knowledge documents and tags." },
+      { name: "Transcripts", description: "Conversation transcripts." },
+      { name: "Billing", description: "Plan, budget, usage, and invoices." },
+      { name: "Settings", description: "Workspace, notifications, team, and webhook config." },
+      { name: "Webhooks", description: "Outbound endpoints and inbound webhook ingest." },
+      { name: "Admin / Metrics", description: "Cross-tenant global metrics." },
+      { name: "Admin / Clients", description: "Manage all client workspaces." },
+      { name: "Admin / Plans", description: "Manage subscription plans." },
+      { name: "Admin / Users", description: "Manage admin operators." },
+      { name: "Admin / Audit", description: "Admin action audit log." },
+      { name: "Admin / Announcements", description: "Publish platform-wide announcements." },
+      { name: "Admin / Support", description: "Triage and respond to client support tickets." },
+      { name: "Portal / Account", description: "Currently signed-in workspace details." },
+      { name: "Portal / API Keys", description: "Workspace-scoped API key CRUD." },
+      { name: "Portal / Support", description: "Client-side support ticket flows." },
+      { name: "Portal / Announcements", description: "Read and acknowledge platform announcements." },
+    ],
   },
 });
 
@@ -79,93 +191,121 @@ await app.register(swaggerUi, {
   routePrefix: "/docs",
 });
 
+// ------------------------------------------------------------------
+// Static HTML pages
+// ------------------------------------------------------------------
+
+async function serveFile(path: string) {
+  return readFile(path, "utf8");
+}
+
+const ROOT = process.cwd();
+
+const clientPortalHtmlPath = resolve(ROOT, "src/ui/client-portal.html");
+const superAdminHtmlPath = resolve(ROOT, "src/ui/super-admin.html");
+const landingHtmlPath = resolve(ROOT, "src/ui/landing.html");
+const previewPortalHtmlPath = env.dashboardHtmlPath;
+const previewAdminHtmlPath = resolve(ROOT, "Sentinel Super Admin Console.html");
+
 app.get(
   "/health",
   {
-    schema: {
-      tags: ["System"],
-      summary: "Health check",
-    },
+    schema: { tags: ["System"], summary: "Health check" },
   },
-  async () => ({
-    status: "ok",
-    now: new Date().toISOString(),
-  }),
+  async () => ({ status: "ok", now: new Date().toISOString() }),
 );
-
-async function serveDashboardHtml() {
-  return readFile(env.dashboardHtmlPath, "utf8");
-}
 
 app.get(
   "/",
   {
-    schema: {
-      tags: ["System"],
-      summary: "Serve the original dashboard HTML",
-    },
+    schema: { tags: ["System"], summary: "Landing page (chooser between portal and admin)" },
   },
   async (_request, reply) => {
     reply.type("text/html; charset=utf-8");
-    return serveDashboardHtml();
+    return serveFile(landingHtmlPath);
+  },
+);
+
+app.get(
+  "/portal",
+  {
+    schema: { tags: ["System"], summary: "Client portal UI" },
+  },
+  async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return serveFile(clientPortalHtmlPath);
+  },
+);
+
+app.get(
+  "/admin",
+  {
+    schema: { tags: ["System"], summary: "Super admin console UI" },
+  },
+  async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return serveFile(superAdminHtmlPath);
+  },
+);
+
+app.get(
+  "/preview/portal",
+  {
+    schema: { tags: ["System"], summary: "Original Aether dashboard bundle (read-only preview)" },
+  },
+  async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return serveFile(previewPortalHtmlPath);
+  },
+);
+
+app.get(
+  "/preview/admin",
+  {
+    schema: { tags: ["System"], summary: "Original Sentinel admin bundle (read-only preview)" },
+  },
+  async (_request, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return serveFile(previewAdminHtmlPath);
   },
 );
 
 app.get(
   "/dashboard",
   {
-    schema: {
-      tags: ["System"],
-      summary: "Serve the original dashboard HTML",
-    },
+    schema: { tags: ["System"], summary: "Legacy alias for /preview/portal" },
   },
   async (_request, reply) => {
     reply.type("text/html; charset=utf-8");
-    return serveDashboardHtml();
+    return serveFile(previewPortalHtmlPath);
   },
 );
 
+// ------------------------------------------------------------------
+// Single-workspace dashboard data (legacy + portal default)
+// ------------------------------------------------------------------
+
 app.get(
   "/api/overview",
-  {
-    schema: {
-      tags: ["Dashboard"],
-      summary: "Overview page data",
-    },
-  },
+  { schema: { tags: ["Dashboard"], summary: "Overview page data" } },
   async () => getOverview(),
 );
 
 app.get(
   "/api/analytics",
-  {
-    schema: {
-      tags: ["Dashboard"],
-      summary: "Analytics page data",
-    },
-  },
+  { schema: { tags: ["Dashboard"], summary: "Analytics page data" } },
   async () => getAnalytics(),
 );
 
 app.get(
   "/api/billing",
-  {
-    schema: {
-      tags: ["Billing"],
-      summary: "Billing page data",
-    },
-  },
+  { schema: { tags: ["Billing"], summary: "Billing page data" } },
   async () => getBilling(),
 );
 
 app.get(
   "/api/agents",
-  {
-    schema: {
-      tags: ["Agents"],
-      summary: "List agents with computed dashboard metrics",
-    },
-  },
+  { schema: { tags: ["Agents"], summary: "List agents with computed dashboard metrics" } },
   async () => getAgents(),
 );
 
@@ -180,6 +320,7 @@ const createAgentBody = Type.Object({
   avatarShape: Type.Optional(Type.String()),
   rating: Type.Optional(Type.Number()),
   knowledgeBaseIds: Type.Optional(Type.Array(Type.String())),
+  workspaceId: Type.Optional(Type.String()),
 });
 
 type CreateAgentBody = Static<typeof createAgentBody>;
@@ -200,6 +341,7 @@ app.post(
     await prisma.agent.create({
       data: {
         id: agentId,
+        workspaceId: body.workspaceId ?? DEFAULT_WORKSPACE_ID,
         name: body.name,
         type: body.type,
         status: body.status ?? "idle",
@@ -208,14 +350,10 @@ app.post(
         greeting: body.greeting,
         avatarShape: body.avatarShape,
         rating: body.rating,
-        channels: {
-          create: body.channels.map((channel) => ({ channel })),
-        },
+        channels: { create: body.channels.map((channel) => ({ channel })) },
         knowledgeBaseLinks:
           body.knowledgeBaseIds && body.knowledgeBaseIds.length > 0
-            ? {
-                create: body.knowledgeBaseIds.map((knowledgeBaseId) => ({ knowledgeBaseId })),
-              }
+            ? { create: body.knowledgeBaseIds.map((knowledgeBaseId) => ({ knowledgeBaseId })) }
             : undefined,
       },
     });
@@ -223,10 +361,7 @@ app.post(
     reply.code(201);
     return prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
-      include: {
-        channels: true,
-        knowledgeBaseLinks: true,
-      },
+      include: { channels: true, knowledgeBaseLinks: true },
     });
   },
 );
@@ -240,9 +375,7 @@ app.patch(
     schema: {
       tags: ["Agents"],
       summary: "Update an agent",
-      params: Type.Object({
-        agentId: Type.String(),
-      }),
+      params: Type.Object({ agentId: Type.String() }),
       body: updateAgentBody,
     },
   },
@@ -262,16 +395,14 @@ app.patch(
           greeting: body.greeting,
           avatarShape: body.avatarShape,
           rating: body.rating,
+          workspaceId: body.workspaceId,
         },
       });
 
       if (body.channels) {
         await tx.agentChannel.deleteMany({ where: { agentId } });
         await tx.agentChannel.createMany({
-          data: body.channels.map((channel) => ({
-            agentId,
-            channel,
-          })),
+          data: body.channels.map((channel) => ({ agentId, channel })),
         });
       }
 
@@ -279,10 +410,7 @@ app.patch(
         await tx.agentKnowledgeBase.deleteMany({ where: { agentId } });
         if (body.knowledgeBaseIds.length > 0) {
           await tx.agentKnowledgeBase.createMany({
-            data: body.knowledgeBaseIds.map((knowledgeBaseId) => ({
-              agentId,
-              knowledgeBaseId,
-            })),
+            data: body.knowledgeBaseIds.map((knowledgeBaseId) => ({ agentId, knowledgeBaseId })),
           });
         }
       }
@@ -290,10 +418,7 @@ app.patch(
 
     return prisma.agent.findUniqueOrThrow({
       where: { id: agentId },
-      include: {
-        channels: true,
-        knowledgeBaseLinks: true,
-      },
+      include: { channels: true, knowledgeBaseLinks: true },
     });
   },
 );
@@ -304,14 +429,8 @@ app.post(
     schema: {
       tags: ["Agents"],
       summary: "Toggle or set agent status",
-      params: Type.Object({
-        agentId: Type.String(),
-      }),
-      body: Type.Optional(
-        Type.Object({
-          status: Type.Optional(agentStatusSchema),
-        }),
-      ),
+      params: Type.Object({ agentId: Type.String() }),
+      body: Type.Optional(Type.Object({ status: Type.Optional(agentStatusSchema) })),
     },
   },
   async (request) => {
@@ -322,12 +441,23 @@ app.post(
       requestedStatus ??
       (current.status === "live" ? "paused" : current.status === "paused" ? "live" : "live");
 
-    return prisma.agent.update({
-      where: { id: agentId },
-      data: {
-        status: nextStatus,
-      },
-    });
+    return prisma.agent.update({ where: { id: agentId }, data: { status: nextStatus } });
+  },
+);
+
+app.delete(
+  "/api/agents/:agentId",
+  {
+    schema: {
+      tags: ["Agents"],
+      summary: "Delete an agent",
+      params: Type.Object({ agentId: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    await prisma.agent.delete({ where: { id: request.params.agentId } });
+    reply.code(204);
+    return null;
   },
 );
 
@@ -352,6 +482,7 @@ const knowledgeBaseBody = Type.Object({
   content: Type.String(),
   tags: Type.Array(Type.String(), { default: [] }),
   agentIds: Type.Optional(Type.Array(Type.String())),
+  workspaceId: Type.Optional(Type.String()),
 });
 
 type KnowledgeBaseBody = Static<typeof knowledgeBaseBody>;
@@ -373,21 +504,17 @@ app.post(
       await tx.knowledgeBaseDocument.create({
         data: {
           id: documentId,
+          workspaceId: body.workspaceId ?? DEFAULT_WORKSPACE_ID,
           title: body.title,
           type: body.type,
           content: body.content,
-          tags: {
-            create: body.tags.map((value) => ({ value })),
-          },
+          tags: { create: body.tags.map((value) => ({ value })) },
         },
       });
 
       if (body.agentIds?.length) {
         await tx.agentKnowledgeBase.createMany({
-          data: body.agentIds.map((agentId) => ({
-            agentId,
-            knowledgeBaseId: documentId,
-          })),
+          data: body.agentIds.map((agentId) => ({ agentId, knowledgeBaseId: documentId })),
         });
       }
     });
@@ -403,9 +530,7 @@ app.get(
     schema: {
       tags: ["Knowledge Base"],
       summary: "Get a knowledge-base entry",
-      params: Type.Object({
-        knowledgeBaseId: Type.String(),
-      }),
+      params: Type.Object({ knowledgeBaseId: Type.String() }),
     },
   },
   async (request) => getKnowledgeBaseDocument(request.params.knowledgeBaseId),
@@ -417,9 +542,7 @@ app.put(
     schema: {
       tags: ["Knowledge Base"],
       summary: "Update a knowledge-base entry",
-      params: Type.Object({
-        knowledgeBaseId: Type.String(),
-      }),
+      params: Type.Object({ knowledgeBaseId: Type.String() }),
       body: knowledgeBaseBody,
     },
   },
@@ -434,16 +557,14 @@ app.put(
           title: body.title,
           type: body.type,
           content: body.content,
+          workspaceId: body.workspaceId ?? undefined,
         },
       });
 
       await tx.knowledgeBaseTag.deleteMany({ where: { knowledgeBaseId } });
       if (body.tags.length) {
         await tx.knowledgeBaseTag.createMany({
-          data: body.tags.map((value) => ({
-            knowledgeBaseId,
-            value,
-          })),
+          data: body.tags.map((value) => ({ knowledgeBaseId, value })),
         });
       }
 
@@ -451,10 +572,7 @@ app.put(
         await tx.agentKnowledgeBase.deleteMany({ where: { knowledgeBaseId } });
         if (body.agentIds.length) {
           await tx.agentKnowledgeBase.createMany({
-            data: body.agentIds.map((agentId) => ({
-              agentId,
-              knowledgeBaseId,
-            })),
+            data: body.agentIds.map((agentId) => ({ agentId, knowledgeBaseId })),
           });
         }
       }
@@ -470,16 +588,13 @@ app.delete(
     schema: {
       tags: ["Knowledge Base"],
       summary: "Delete a knowledge-base entry",
-      params: Type.Object({
-        knowledgeBaseId: Type.String(),
-      }),
+      params: Type.Object({ knowledgeBaseId: Type.String() }),
     },
   },
   async (request, reply) => {
     await prisma.knowledgeBaseDocument.delete({
       where: { id: request.params.knowledgeBaseId },
     });
-
     reply.code(204);
     return null;
   },
@@ -514,9 +629,7 @@ app.get(
     schema: {
       tags: ["Transcripts"],
       summary: "Get a single transcript with its full thread",
-      params: Type.Object({
-        transcriptId: Type.String(),
-      }),
+      params: Type.Object({ transcriptId: Type.String() }),
     },
   },
   async (request) => getTranscript(request.params.transcriptId),
@@ -524,12 +637,7 @@ app.get(
 
 app.get(
   "/api/settings",
-  {
-    schema: {
-      tags: ["Settings"],
-      summary: "Get workspace, notification, team, and webhook settings",
-    },
-  },
+  { schema: { tags: ["Settings"], summary: "Get workspace, notification, team, and webhook settings" } },
   async () => getSettings(),
 );
 
@@ -558,9 +666,7 @@ app.put(
     schema: {
       tags: ["Settings"],
       summary: "Update a notification rule",
-      params: Type.Object({
-        eventType: notificationEventSchema,
-      }),
+      params: Type.Object({ eventType: notificationEventSchema }),
       body: Type.Object({
         emailEnabled: Type.Boolean(),
         webhookEnabled: Type.Boolean(),
@@ -581,28 +687,39 @@ const teamMemberBody = Type.Object({
   role: Type.Union([Type.Literal("owner"), Type.Literal("admin"), Type.Literal("viewer")]),
   initials: Type.String({ minLength: 1 }),
   color: Type.String({ minLength: 1 }),
+  workspaceId: Type.Optional(Type.String()),
 });
 
 app.post(
   "/api/team",
-  {
-    schema: {
-      tags: ["Settings"],
-      summary: "Invite or add a team member",
-      body: teamMemberBody,
-    },
-  },
+  { schema: { tags: ["Settings"], summary: "Invite or add a team member", body: teamMemberBody } },
   async (request, reply) => {
+    const { workspaceId, ...rest } = request.body;
     const teamMember = await prisma.teamMember.create({
       data: {
         id: createPrefixedId("team"),
-        workspaceId: DEFAULT_WORKSPACE_ID,
-        ...request.body,
+        workspaceId: workspaceId ?? DEFAULT_WORKSPACE_ID,
+        ...rest,
       },
     });
-
     reply.code(201);
     return teamMember;
+  },
+);
+
+app.delete(
+  "/api/team/:memberId",
+  {
+    schema: {
+      tags: ["Settings"],
+      summary: "Remove a team member",
+      params: Type.Object({ memberId: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    await prisma.teamMember.delete({ where: { id: request.params.memberId } });
+    reply.code(204);
+    return null;
   },
 );
 
@@ -612,6 +729,7 @@ const webhookEndpointBody = Type.Object({
   status: Type.Optional(Type.String()),
   description: Type.Optional(Type.String()),
   events: Type.Array(Type.String(), { minItems: 1 }),
+  workspaceId: Type.Optional(Type.String()),
 });
 
 type WebhookEndpointBody = Static<typeof webhookEndpointBody>;
@@ -632,13 +750,12 @@ app.post(
     await prisma.webhookEndpoint.create({
       data: {
         id: endpointId,
+        workspaceId: body.workspaceId ?? DEFAULT_WORKSPACE_ID,
         url: body.url,
         secret: body.secret,
         status: body.status ?? "active",
         description: body.description,
-        events: {
-          create: body.events.map((eventType) => ({ eventType })),
-        },
+        events: { create: body.events.map((eventType) => ({ eventType })) },
       },
     });
 
@@ -656,9 +773,7 @@ app.patch(
     schema: {
       tags: ["Webhooks"],
       summary: "Update an outbound webhook endpoint",
-      params: Type.Object({
-        endpointId: Type.String(),
-      }),
+      params: Type.Object({ endpointId: Type.String() }),
       body: Type.Partial(webhookEndpointBody),
     },
   },
@@ -680,10 +795,7 @@ app.patch(
       if (body.events) {
         await tx.webhookEndpointEvent.deleteMany({ where: { endpointId } });
         await tx.webhookEndpointEvent.createMany({
-          data: body.events.map((eventType) => ({
-            endpointId,
-            eventType,
-          })),
+          data: body.events.map((eventType) => ({ endpointId, eventType })),
         });
       }
     });
@@ -701,16 +813,11 @@ app.delete(
     schema: {
       tags: ["Webhooks"],
       summary: "Delete an outbound webhook endpoint",
-      params: Type.Object({
-        endpointId: Type.String(),
-      }),
+      params: Type.Object({ endpointId: Type.String() }),
     },
   },
   async (request, reply) => {
-    await prisma.webhookEndpoint.delete({
-      where: { id: request.params.endpointId },
-    });
-
+    await prisma.webhookEndpoint.delete({ where: { id: request.params.endpointId } });
     reply.code(204);
     return null;
   },
@@ -722,13 +829,672 @@ app.post(
     schema: {
       tags: ["Webhooks"],
       summary: "Send a test event to an outbound webhook endpoint",
-      params: Type.Object({
-        endpointId: Type.String(),
-      }),
+      params: Type.Object({ endpointId: Type.String() }),
     },
   },
   async (request) => sendTestWebhook(prisma, request.params.endpointId),
 );
+
+// ------------------------------------------------------------------
+// Super Admin endpoints (cross-tenant)
+// ------------------------------------------------------------------
+
+function adminId(request: { headers: Record<string, unknown> }): string | undefined {
+  const value = request.headers["x-admin-id"];
+  return typeof value === "string" ? value : undefined;
+}
+
+app.get(
+  "/api/admin/metrics",
+  { schema: { tags: ["Admin / Metrics"], summary: "Platform-wide metrics across all clients" } },
+  async () => getGlobalMetrics(),
+);
+
+app.get(
+  "/api/admin/clients",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "List all client workspaces with usage and counts",
+      querystring: Type.Object({
+        status: Type.Optional(workspaceStatusSchema),
+        search: Type.Optional(Type.String()),
+      }),
+    },
+  },
+  async (request) =>
+    listClients({
+      status: request.query.status as WorkspaceStatus | undefined,
+      search: request.query.search,
+    }),
+);
+
+const createClientBody = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  contactName: Type.Optional(Type.String()),
+  contactEmail: Type.Optional(Type.String()),
+  contactPhone: Type.Optional(Type.String()),
+  timezone: Type.Optional(Type.String()),
+  defaultLanguage: Type.Optional(Type.String()),
+  planId: Type.Optional(Type.String()),
+  status: Type.Optional(workspaceStatusSchema),
+  monthlyBudgetCents: Type.Optional(Type.Integer({ minimum: 0 })),
+  trialEndsAt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+});
+
+app.post(
+  "/api/admin/clients",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Provision a new client workspace",
+      body: createClientBody,
+    },
+  },
+  async (request, reply) => {
+    const body = request.body as Static<typeof createClientBody>;
+    const workspace = await createClient({
+      ...body,
+      status: body.status as WorkspaceStatus | undefined,
+    }, adminId(request));
+    reply.code(201);
+    return workspace;
+  },
+);
+
+app.get(
+  "/api/admin/clients/:workspaceId",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Get a client workspace with team, tickets, and api keys",
+      params: Type.Object({ workspaceId: Type.String() }),
+    },
+  },
+  async (request) => getClient(request.params.workspaceId),
+);
+
+app.patch(
+  "/api/admin/clients/:workspaceId",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Update a client workspace (rename, contact, plan, budget, timezone)",
+      params: Type.Object({ workspaceId: Type.String() }),
+      body: Type.Partial(
+        Type.Object({
+          name: Type.String(),
+          contactName: Type.String(),
+          contactEmail: Type.String(),
+          contactPhone: Type.String(),
+          timezone: Type.String(),
+          defaultLanguage: Type.String(),
+          retentionDays: Type.Union([Type.Integer(), Type.Null()]),
+          planId: Type.Union([Type.String(), Type.Null()]),
+          monthlyBudgetCents: Type.Integer({ minimum: 0 }),
+        }),
+      ),
+    },
+  },
+  async (request) => updateClient(request.params.workspaceId, request.body, adminId(request)),
+);
+
+app.post(
+  "/api/admin/clients/:workspaceId/suspend",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Suspend a client (block portal access and pause agents)",
+      params: Type.Object({ workspaceId: Type.String() }),
+      body: Type.Object({ reason: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) =>
+    setClientStatus(
+      request.params.workspaceId,
+      "suspended" as WorkspaceStatus,
+      request.body.reason,
+      adminId(request),
+    ),
+);
+
+app.post(
+  "/api/admin/clients/:workspaceId/activate",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Re-activate a client",
+      params: Type.Object({ workspaceId: Type.String() }),
+    },
+  },
+  async (request) =>
+    setClientStatus(request.params.workspaceId, "active" as WorkspaceStatus, undefined, adminId(request)),
+);
+
+app.post(
+  "/api/admin/clients/:workspaceId/archive",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Archive a client (soft delete)",
+      params: Type.Object({ workspaceId: Type.String() }),
+    },
+  },
+  async (request) =>
+    setClientStatus(request.params.workspaceId, "archived" as WorkspaceStatus, undefined, adminId(request)),
+);
+
+app.post(
+  "/api/admin/clients/:workspaceId/impersonate",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Mint a short-lived impersonation token to open the client portal in support mode",
+      params: Type.Object({ workspaceId: Type.String() }),
+    },
+  },
+  async (request) => impersonateClient(request.params.workspaceId, adminId(request)),
+);
+
+app.delete(
+  "/api/admin/clients/:workspaceId",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary: "Permanently delete a client workspace (and cascade its data)",
+      params: Type.Object({ workspaceId: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    await deleteClient(request.params.workspaceId, adminId(request));
+    reply.code(204);
+    return null;
+  },
+);
+
+// ----- Plans
+app.get("/api/admin/plans", { schema: { tags: ["Admin / Plans"], summary: "List plans" } }, async () => listPlans());
+
+const planBody = Type.Object({
+  name: Type.String({ minLength: 1 }),
+  slug: Type.Optional(Type.String()),
+  description: Type.Optional(Type.String()),
+  monthlyFeeCents: Type.Integer({ minimum: 0 }),
+  includedVoiceMinutes: Type.Optional(Type.Integer({ minimum: 0 })),
+  includedAiMinutes: Type.Optional(Type.Integer({ minimum: 0 })),
+  includedMessages: Type.Optional(Type.Integer({ minimum: 0 })),
+  maxAgents: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+  maxKnowledgeDocuments: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+  isPublic: Type.Optional(Type.Boolean()),
+  isDefault: Type.Optional(Type.Boolean()),
+});
+
+app.post(
+  "/api/admin/plans",
+  { schema: { tags: ["Admin / Plans"], summary: "Create a plan", body: planBody } },
+  async (request, reply) => {
+    const plan = await createPlan(request.body as Static<typeof planBody>, adminId(request));
+    reply.code(201);
+    return plan;
+  },
+);
+
+app.patch(
+  "/api/admin/plans/:planId",
+  {
+    schema: {
+      tags: ["Admin / Plans"],
+      summary: "Update a plan",
+      params: Type.Object({ planId: Type.String() }),
+      body: Type.Partial(planBody),
+    },
+  },
+  async (request) => updatePlan(request.params.planId, request.body, adminId(request)),
+);
+
+app.delete(
+  "/api/admin/plans/:planId",
+  {
+    schema: {
+      tags: ["Admin / Plans"],
+      summary: "Delete a plan",
+      params: Type.Object({ planId: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    await deletePlan(request.params.planId, adminId(request));
+    reply.code(204);
+    return null;
+  },
+);
+
+// ----- Admin users
+app.get(
+  "/api/admin/admins",
+  { schema: { tags: ["Admin / Users"], summary: "List admin operators" } },
+  async () => listAdmins(),
+);
+
+const inviteAdminBody = Type.Object({
+  email: Type.String({ format: "email" }),
+  name: Type.String({ minLength: 1 }),
+  role: adminRoleSchema,
+  initials: Type.String({ minLength: 1, maxLength: 4 }),
+  color: Type.Optional(Type.String()),
+});
+
+app.post(
+  "/api/admin/admins",
+  { schema: { tags: ["Admin / Users"], summary: "Invite a new admin operator", body: inviteAdminBody } },
+  async (request, reply) => {
+    const body = request.body as Static<typeof inviteAdminBody>;
+    const admin = await inviteAdmin({ ...body, role: body.role as AdminRole }, adminId(request));
+    reply.code(201);
+    return admin;
+  },
+);
+
+app.patch(
+  "/api/admin/admins/:adminUserId",
+  {
+    schema: {
+      tags: ["Admin / Users"],
+      summary: "Update an admin (role, name, color, active flag)",
+      params: Type.Object({ adminUserId: Type.String() }),
+      body: Type.Partial(
+        Type.Object({
+          name: Type.String(),
+          role: adminRoleSchema,
+          isActive: Type.Boolean(),
+          color: Type.String(),
+        }),
+      ),
+    },
+  },
+  async (request) =>
+    updateAdmin(
+      request.params.adminUserId,
+      {
+        ...request.body,
+        role: request.body.role as AdminRole | undefined,
+      },
+      adminId(request),
+    ),
+);
+
+app.delete(
+  "/api/admin/admins/:adminUserId",
+  {
+    schema: {
+      tags: ["Admin / Users"],
+      summary: "Deactivate an admin operator",
+      params: Type.Object({ adminUserId: Type.String() }),
+    },
+  },
+  async (request) => deactivateAdmin(request.params.adminUserId, adminId(request)),
+);
+
+// ----- Audit log
+app.get(
+  "/api/admin/audit",
+  {
+    schema: {
+      tags: ["Admin / Audit"],
+      summary: "List recent admin actions",
+      querystring: Type.Object({
+        limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
+      }),
+    },
+  },
+  async (request) => getAuditLog(request.query.limit ?? 100),
+);
+
+// ----- Announcements
+app.get(
+  "/api/admin/announcements",
+  { schema: { tags: ["Admin / Announcements"], summary: "List published announcements with acknowledgement counts" } },
+  async () => listAnnouncements(),
+);
+
+const announcementBody = Type.Object({
+  title: Type.String({ minLength: 1 }),
+  body: Type.String({ minLength: 1 }),
+  severity: Type.Optional(announcementSeveritySchema),
+  audience: Type.Optional(announcementAudienceSchema),
+  workspaceIds: Type.Optional(Type.Array(Type.String())),
+  expiresAt: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+});
+
+app.post(
+  "/api/admin/announcements",
+  {
+    schema: {
+      tags: ["Admin / Announcements"],
+      summary: "Publish a new announcement to all or a subset of clients",
+      body: announcementBody,
+    },
+  },
+  async (request, reply) => {
+    const body = request.body as Static<typeof announcementBody>;
+    const announcement = await publishAnnouncement(
+      {
+        ...body,
+        severity: body.severity as AnnouncementSeverity | undefined,
+        audience: body.audience as AnnouncementAudience | undefined,
+      },
+      adminId(request),
+    );
+    reply.code(201);
+    return announcement;
+  },
+);
+
+app.delete(
+  "/api/admin/announcements/:announcementId",
+  {
+    schema: {
+      tags: ["Admin / Announcements"],
+      summary: "Retract a published announcement",
+      params: Type.Object({ announcementId: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    await retractAnnouncement(request.params.announcementId, adminId(request));
+    reply.code(204);
+    return null;
+  },
+);
+
+// ----- Support (admin view)
+app.get(
+  "/api/admin/support/tickets",
+  {
+    schema: {
+      tags: ["Admin / Support"],
+      summary: "List support tickets across all clients",
+      querystring: Type.Object({
+        workspaceId: Type.Optional(Type.String()),
+        status: Type.Optional(ticketStatusSchema),
+      }),
+    },
+  },
+  async (request) =>
+    listSupportTickets({
+      workspaceId: request.query.workspaceId,
+      status: request.query.status as SupportTicketStatus | undefined,
+    }),
+);
+
+app.get(
+  "/api/admin/support/tickets/:ticketId",
+  {
+    schema: {
+      tags: ["Admin / Support"],
+      summary: "Get a single support ticket with messages",
+      params: Type.Object({ ticketId: Type.String() }),
+    },
+  },
+  async (request) => getSupportTicket(request.params.ticketId),
+);
+
+app.patch(
+  "/api/admin/support/tickets/:ticketId",
+  {
+    schema: {
+      tags: ["Admin / Support"],
+      summary: "Update a ticket (status, priority, assignee)",
+      params: Type.Object({ ticketId: Type.String() }),
+      body: Type.Object({
+        status: Type.Optional(ticketStatusSchema),
+        priority: Type.Optional(ticketPrioritySchema),
+        assignedTo: Type.Optional(Type.Union([Type.String(), Type.Null()])),
+      }),
+    },
+  },
+  async (request) =>
+    updateTicket(
+      request.params.ticketId,
+      {
+        status: request.body.status as SupportTicketStatus | undefined,
+        priority: request.body.priority as SupportTicketPriority | undefined,
+        assignedTo: request.body.assignedTo ?? undefined,
+      },
+      adminId(request),
+    ),
+);
+
+app.post(
+  "/api/admin/support/tickets/:ticketId/reply",
+  {
+    schema: {
+      tags: ["Admin / Support"],
+      summary: "Reply to a support ticket as an admin",
+      params: Type.Object({ ticketId: Type.String() }),
+      body: Type.Object({
+        author: Type.String({ minLength: 1 }),
+        body: Type.String({ minLength: 1 }),
+      }),
+    },
+  },
+  async (request, reply) => {
+    const message = await replyToTicket(request.params.ticketId, request.body, adminId(request));
+    reply.code(201);
+    return message;
+  },
+);
+
+// ------------------------------------------------------------------
+// Client Portal endpoints
+// ------------------------------------------------------------------
+
+function workspaceIdFromRequest(request: { headers: Record<string, unknown>; query: { workspaceId?: string } | unknown }): string {
+  const headerValue = request.headers["x-workspace-id"];
+  if (typeof headerValue === "string" && headerValue.length > 0) {
+    return headerValue;
+  }
+  const query = (request as { query?: { workspaceId?: string } }).query;
+  if (query?.workspaceId) {
+    return query.workspaceId;
+  }
+  return DEFAULT_WORKSPACE_ID;
+}
+
+app.get(
+  "/api/portal/workspaces",
+  { schema: { tags: ["Portal / Account"], summary: "List workspaces available for portal switcher" } },
+  async () => listWorkspaces(),
+);
+
+app.get(
+  "/api/portal/account",
+  {
+    schema: {
+      tags: ["Portal / Account"],
+      summary: "Current workspace profile and plan",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => getPortalAccount(workspaceIdFromRequest(request)),
+);
+
+app.patch(
+  "/api/portal/account",
+  {
+    schema: {
+      tags: ["Portal / Account"],
+      summary: "Update workspace profile fields",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+      body: Type.Partial(
+        Type.Object({
+          name: Type.String(),
+          contactName: Type.String(),
+          contactEmail: Type.String(),
+          contactPhone: Type.String(),
+          timezone: Type.String(),
+          defaultLanguage: Type.String(),
+          retentionDays: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()]),
+          monthlyBudgetCents: Type.Integer({ minimum: 0 }),
+        }),
+      ),
+    },
+  },
+  async (request) => updateClient(workspaceIdFromRequest(request), request.body, undefined),
+);
+
+app.get(
+  "/api/portal/usage",
+  {
+    schema: {
+      tags: ["Portal / Account"],
+      summary: "Detailed month-to-date usage and budget consumption",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => getPortalUsage(workspaceIdFromRequest(request)),
+);
+
+app.get(
+  "/api/portal/api-keys",
+  {
+    schema: {
+      tags: ["Portal / API Keys"],
+      summary: "List active API keys for the workspace",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => listApiKeys(workspaceIdFromRequest(request)),
+);
+
+app.post(
+  "/api/portal/api-keys",
+  {
+    schema: {
+      tags: ["Portal / API Keys"],
+      summary: "Create a new API key. Secret returned only once.",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+      body: Type.Object({
+        label: Type.String({ minLength: 1 }),
+        scopes: Type.Optional(Type.Array(Type.String())),
+      }),
+    },
+  },
+  async (request, reply) => {
+    const key = await createApiKey(workspaceIdFromRequest(request), request.body);
+    reply.code(201);
+    return key;
+  },
+);
+
+app.delete(
+  "/api/portal/api-keys/:keyId",
+  {
+    schema: {
+      tags: ["Portal / API Keys"],
+      summary: "Revoke an API key",
+      params: Type.Object({ keyId: Type.String() }),
+    },
+  },
+  async (request) => revokeApiKey(request.params.keyId),
+);
+
+app.get(
+  "/api/portal/support/tickets",
+  {
+    schema: {
+      tags: ["Portal / Support"],
+      summary: "List client's support tickets",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => listClientSupportTickets(workspaceIdFromRequest(request)),
+);
+
+app.post(
+  "/api/portal/support/tickets",
+  {
+    schema: {
+      tags: ["Portal / Support"],
+      summary: "Open a new support ticket",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+      body: Type.Object({
+        subject: Type.String({ minLength: 1 }),
+        body: Type.String({ minLength: 1 }),
+        priority: Type.Optional(ticketPrioritySchema),
+        openedBy: Type.Optional(Type.String()),
+      }),
+    },
+  },
+  async (request, reply) => {
+    const ticket = await openSupportTicket(workspaceIdFromRequest(request), {
+      ...request.body,
+      priority: request.body.priority as SupportTicketPriority | undefined,
+    });
+    reply.code(201);
+    return ticket;
+  },
+);
+
+app.get(
+  "/api/portal/support/tickets/:ticketId",
+  {
+    schema: {
+      tags: ["Portal / Support"],
+      summary: "Get the client's view of a ticket and its message thread",
+      params: Type.Object({ ticketId: Type.String() }),
+    },
+  },
+  async (request) => getClientSupportTicket(request.params.ticketId),
+);
+
+app.post(
+  "/api/portal/support/tickets/:ticketId/reply",
+  {
+    schema: {
+      tags: ["Portal / Support"],
+      summary: "Reply to a ticket as the client",
+      params: Type.Object({ ticketId: Type.String() }),
+      body: Type.Object({
+        author: Type.String({ minLength: 1 }),
+        body: Type.String({ minLength: 1 }),
+      }),
+    },
+  },
+  async (request, reply) => {
+    const result = await replyAsClient(request.params.ticketId, request.body);
+    reply.code(201);
+    return result;
+  },
+);
+
+app.get(
+  "/api/portal/announcements",
+  {
+    schema: {
+      tags: ["Portal / Announcements"],
+      summary: "Announcements visible to this workspace",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => listAnnouncementsForWorkspace(workspaceIdFromRequest(request)),
+);
+
+app.post(
+  "/api/portal/announcements/:announcementId/ack",
+  {
+    schema: {
+      tags: ["Portal / Announcements"],
+      summary: "Mark an announcement as acknowledged",
+      params: Type.Object({ announcementId: Type.String() }),
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) =>
+    acknowledgeAnnouncement(workspaceIdFromRequest(request), request.params.announcementId),
+);
+
+// ------------------------------------------------------------------
+// Inbound webhook (unchanged behavior)
+// ------------------------------------------------------------------
 
 const inboundWebhookBody = Type.Object({
   id: Type.Optional(Type.String()),
@@ -786,7 +1552,9 @@ const inboundWebhookBody = Type.Object({
       endedAt: Type.Optional(Type.String()),
       durationSec: Type.Optional(Type.Number()),
       outcome: Type.Optional(Type.String()),
-      sentiment: Type.Optional(Type.Union([Type.Literal("pos"), Type.Literal("neu"), Type.Literal("neg")])),
+      sentiment: Type.Optional(
+        Type.Union([Type.Literal("pos"), Type.Literal("neu"), Type.Literal("neg")]),
+      ),
       responseTimeMs: Type.Optional(Type.Number()),
       sentimentScore: Type.Optional(Type.Number()),
       resolution: Type.Optional(Type.String()),
@@ -796,8 +1564,12 @@ const inboundWebhookBody = Type.Object({
       thread: Type.Optional(
         Type.Array(
           Type.Object({
-            speaker: Type.Optional(Type.Union([Type.Literal("agent"), Type.Literal("user"), Type.Literal("system")])),
-            who: Type.Optional(Type.Union([Type.Literal("agent"), Type.Literal("user"), Type.Literal("system")])),
+            speaker: Type.Optional(
+              Type.Union([Type.Literal("agent"), Type.Literal("user"), Type.Literal("system")]),
+            ),
+            who: Type.Optional(
+              Type.Union([Type.Literal("agent"), Type.Literal("user"), Type.Literal("system")]),
+            ),
             timestampOffsetSec: Type.Optional(Type.Number()),
             text: Type.String(),
           }),
@@ -808,7 +1580,9 @@ const inboundWebhookBody = Type.Object({
   knowledgeBase: Type.Optional(
     Type.Object({
       id: Type.Optional(Type.String()),
-      action: Type.Optional(Type.Union([Type.Literal("create"), Type.Literal("update"), Type.Literal("delete")])),
+      action: Type.Optional(
+        Type.Union([Type.Literal("create"), Type.Literal("update"), Type.Literal("delete")]),
+      ),
       title: Type.Optional(Type.String()),
       type: Type.Optional(knowledgeBaseTypeSchema),
       content: Type.Optional(Type.String()),
@@ -823,7 +1597,8 @@ app.post(
   {
     schema: {
       tags: ["Webhooks"],
-      summary: "Inbound webhook for agent activity: calls, transcripts, messages, and knowledge-base changes",
+      summary:
+        "Inbound webhook for agent activity: calls, transcripts, messages, and knowledge-base changes",
       body: inboundWebhookBody,
     },
   },
@@ -847,9 +1622,7 @@ function replyUnauthorized(): never {
 
 app.setErrorHandler((error: Error & { statusCode?: number }, _request, reply) => {
   app.log.error(error);
-  reply.status(error.statusCode ?? 500).send({
-    message: error.message,
-  });
+  reply.status(error.statusCode ?? 500).send({ message: error.message });
 });
 
 await prisma.$connect();
@@ -858,7 +1631,4 @@ app.addHook("onClose", async () => {
   await prisma.$disconnect();
 });
 
-await app.listen({
-  port: env.port,
-  host: env.host,
-});
+await app.listen({ port: env.port, host: env.host });

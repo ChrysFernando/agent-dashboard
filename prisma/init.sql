@@ -1,12 +1,40 @@
 -- CreateTable
+CREATE TABLE "Plan" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "slug" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "description" TEXT,
+    "monthlyFeeCents" INTEGER NOT NULL DEFAULT 0,
+    "includedVoiceMinutes" INTEGER NOT NULL DEFAULT 0,
+    "includedAiMinutes" INTEGER NOT NULL DEFAULT 0,
+    "includedMessages" INTEGER NOT NULL DEFAULT 0,
+    "maxAgents" INTEGER,
+    "maxKnowledgeDocuments" INTEGER,
+    "isPublic" BOOLEAN NOT NULL DEFAULT true,
+    "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
 CREATE TABLE "Workspace" (
     "id" TEXT NOT NULL PRIMARY KEY,
     "name" TEXT NOT NULL,
+    "slug" TEXT NOT NULL,
+    "contactName" TEXT,
+    "contactEmail" TEXT,
+    "contactPhone" TEXT,
     "timezone" TEXT NOT NULL,
     "defaultLanguage" TEXT NOT NULL,
     "retentionDays" INTEGER,
+    "status" TEXT NOT NULL DEFAULT 'active',
+    "monthlyBudgetCents" INTEGER NOT NULL DEFAULT 0,
+    "trialEndsAt" DATETIME,
+    "suspendedReason" TEXT,
+    "planId" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Workspace_planId_fkey" FOREIGN KEY ("planId") REFERENCES "Plan" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -36,6 +64,7 @@ CREATE TABLE "TeamMember" (
 -- CreateTable
 CREATE TABLE "Agent" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "externalId" TEXT,
     "name" TEXT NOT NULL,
     "type" TEXT NOT NULL,
@@ -46,7 +75,8 @@ CREATE TABLE "Agent" (
     "greeting" TEXT,
     "rating" REAL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Agent_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -60,13 +90,15 @@ CREATE TABLE "AgentChannel" (
 -- CreateTable
 CREATE TABLE "KnowledgeBaseDocument" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "externalId" TEXT,
     "title" TEXT NOT NULL,
     "type" TEXT NOT NULL,
     "content" TEXT NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    "lastWebhookAt" DATETIME
+    "lastWebhookAt" DATETIME,
+    CONSTRAINT "KnowledgeBaseDocument_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -90,6 +122,7 @@ CREATE TABLE "AgentKnowledgeBase" (
 -- CreateTable
 CREATE TABLE "Call" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "externalId" TEXT,
     "agentId" TEXT NOT NULL,
     "contact" TEXT NOT NULL,
@@ -106,12 +139,14 @@ CREATE TABLE "Call" (
     "metadataJson" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Call_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Call_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
 CREATE TABLE "MessageEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "externalId" TEXT,
     "agentId" TEXT NOT NULL,
     "transcriptId" TEXT,
@@ -124,6 +159,7 @@ CREATE TABLE "MessageEvent" (
     "metadataJson" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "MessageEvent_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "MessageEvent_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "MessageEvent_transcriptId_fkey" FOREIGN KEY ("transcriptId") REFERENCES "Transcript" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
@@ -131,6 +167,7 @@ CREATE TABLE "MessageEvent" (
 -- CreateTable
 CREATE TABLE "Transcript" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "externalId" TEXT,
     "agentId" TEXT NOT NULL,
     "channel" TEXT NOT NULL,
@@ -149,6 +186,7 @@ CREATE TABLE "Transcript" (
     "rawPayloadJson" TEXT,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Transcript_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Transcript_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
     CONSTRAINT "Transcript_callId_fkey" FOREIGN KEY ("callId") REFERENCES "Call" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
@@ -176,6 +214,7 @@ CREATE TABLE "TranscriptEntry" (
 -- CreateTable
 CREATE TABLE "AgentEvent" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "eventType" TEXT NOT NULL,
     "summary" TEXT NOT NULL,
     "severity" TEXT NOT NULL DEFAULT 'info',
@@ -187,6 +226,7 @@ CREATE TABLE "AgentEvent" (
     "payloadJson" TEXT,
     "occurredAt" DATETIME NOT NULL,
     "processedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AgentEvent_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "AgentEvent_agentId_fkey" FOREIGN KEY ("agentId") REFERENCES "Agent" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "AgentEvent_callId_fkey" FOREIGN KEY ("callId") REFERENCES "Call" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "AgentEvent_messageEventId_fkey" FOREIGN KEY ("messageEventId") REFERENCES "MessageEvent" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
@@ -231,6 +271,7 @@ CREATE TABLE "Invoice" (
 -- CreateTable
 CREATE TABLE "WebhookEndpoint" (
     "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT,
     "url" TEXT NOT NULL,
     "secret" TEXT,
     "status" TEXT NOT NULL DEFAULT 'active',
@@ -238,7 +279,8 @@ CREATE TABLE "WebhookEndpoint" (
     "lastTestedAt" DATETIME,
     "lastDeliveryAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "WebhookEndpoint_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -272,6 +314,104 @@ CREATE TABLE "DashboardSnapshot" (
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
+
+-- CreateTable
+CREATE TABLE "AdminUser" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "email" TEXT NOT NULL,
+    "name" TEXT NOT NULL,
+    "role" TEXT NOT NULL DEFAULT 'support',
+    "initials" TEXT NOT NULL,
+    "color" TEXT NOT NULL DEFAULT '#7b61ff',
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "lastLoginAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "AdminAuditLog" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "adminId" TEXT,
+    "action" TEXT NOT NULL,
+    "targetType" TEXT,
+    "targetId" TEXT,
+    "summary" TEXT NOT NULL,
+    "metadataJson" TEXT,
+    "occurredAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "AdminAuditLog_adminId_fkey" FOREIGN KEY ("adminId") REFERENCES "AdminUser" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "Announcement" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "title" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "severity" TEXT NOT NULL DEFAULT 'info',
+    "audience" TEXT NOT NULL DEFAULT 'all',
+    "publishedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "expiresAt" DATETIME,
+    "createdById" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "AnnouncementTarget" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "announcementId" TEXT NOT NULL,
+    "workspaceId" TEXT NOT NULL,
+    "acknowledgedAt" DATETIME,
+    CONSTRAINT "AnnouncementTarget_announcementId_fkey" FOREIGN KEY ("announcementId") REFERENCES "Announcement" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "AnnouncementTarget_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "ClientApiKey" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT NOT NULL,
+    "label" TEXT NOT NULL,
+    "prefix" TEXT NOT NULL,
+    "hashedSecret" TEXT NOT NULL,
+    "scopes" TEXT NOT NULL DEFAULT 'read,write',
+    "lastUsedAt" DATETIME,
+    "revokedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "ClientApiKey_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SupportTicket" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "workspaceId" TEXT NOT NULL,
+    "subject" TEXT NOT NULL,
+    "body" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'open',
+    "priority" TEXT NOT NULL DEFAULT 'normal',
+    "openedBy" TEXT,
+    "assignedTo" TEXT,
+    "resolvedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "SupportTicket_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "SupportTicketMessage" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "ticketId" TEXT NOT NULL,
+    "author" TEXT NOT NULL,
+    "authorRole" TEXT NOT NULL DEFAULT 'client',
+    "body" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "SupportTicketMessage_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "SupportTicket" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Plan_slug_key" ON "Plan"("slug");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Workspace_slug_key" ON "Workspace"("slug");
 
 -- CreateIndex
 CREATE UNIQUE INDEX "NotificationRule_workspaceId_eventType_key" ON "NotificationRule"("workspaceId", "eventType");
@@ -332,4 +472,19 @@ CREATE UNIQUE INDEX "BillingUsageSnapshot_workspaceId_periodStart_key" ON "Billi
 
 -- CreateIndex
 CREATE UNIQUE INDEX "WebhookEndpointEvent_endpointId_eventType_key" ON "WebhookEndpointEvent"("endpointId", "eventType");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AdminUser_email_key" ON "AdminUser"("email");
+
+-- CreateIndex
+CREATE INDEX "AdminAuditLog_occurredAt_idx" ON "AdminAuditLog"("occurredAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "AnnouncementTarget_announcementId_workspaceId_key" ON "AnnouncementTarget"("announcementId", "workspaceId");
+
+-- CreateIndex
+CREATE INDEX "ClientApiKey_workspaceId_idx" ON "ClientApiKey"("workspaceId");
+
+-- CreateIndex
+CREATE INDEX "SupportTicket_workspaceId_status_idx" ON "SupportTicket"("workspaceId", "status");
 

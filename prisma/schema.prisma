@@ -63,18 +63,98 @@ enum WebhookDeliveryStatus {
   failed
 }
 
+enum WorkspaceStatus {
+  trial
+  active
+  suspended
+  archived
+}
+
+enum AdminRole {
+  super_admin
+  support
+  billing
+  read_only
+}
+
+enum AnnouncementSeverity {
+  info
+  warning
+  critical
+}
+
+enum AnnouncementAudience {
+  all
+  trial
+  active
+  suspended
+  custom
+}
+
+enum SupportTicketStatus {
+  open
+  pending
+  resolved
+  closed
+}
+
+enum SupportTicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+model Plan {
+  id                    String      @id @default(cuid())
+  slug                  String      @unique
+  name                  String
+  description           String?
+  monthlyFeeCents       Int         @default(0)
+  includedVoiceMinutes  Int         @default(0)
+  includedAiMinutes     Int         @default(0)
+  includedMessages      Int         @default(0)
+  maxAgents             Int?
+  maxKnowledgeDocuments Int?
+  isPublic              Boolean     @default(true)
+  isDefault             Boolean     @default(false)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  workspaces            Workspace[]
+}
+
 model Workspace {
   id               String                @id @default(cuid())
   name             String
+  slug             String                @unique
+  contactName      String?
+  contactEmail     String?
+  contactPhone     String?
   timezone         String
   defaultLanguage  String
   retentionDays    Int?
+  status           WorkspaceStatus       @default(active)
+  monthlyBudgetCents Int                 @default(0)
+  trialEndsAt      DateTime?
+  suspendedReason  String?
+  planId           String?
   createdAt        DateTime              @default(now())
   updatedAt        DateTime              @updatedAt
+  plan             Plan?                 @relation(fields: [planId], references: [id], onDelete: SetNull)
   notifications    NotificationRule[]
   teamMembers      TeamMember[]
   billingSnapshots BillingUsageSnapshot[]
   invoices         Invoice[]
+  agents           Agent[]
+  knowledgeBaseDocuments KnowledgeBaseDocument[]
+  calls            Call[]
+  transcripts      Transcript[]
+  messageEvents    MessageEvent[]
+  agentEvents      AgentEvent[]
+  webhookEndpoints WebhookEndpoint[]
+  apiKeys          ClientApiKey[]
+  supportTickets   SupportTicket[]
+  announcementTargets AnnouncementTarget[]
 }
 
 model NotificationRule {
@@ -103,6 +183,7 @@ model TeamMember {
 
 model Agent {
   id                 String                @id @default(cuid())
+  workspaceId        String?
   externalId         String?               @unique
   name               String                @unique
   type               AgentType
@@ -114,6 +195,7 @@ model Agent {
   rating             Float?
   createdAt          DateTime              @default(now())
   updatedAt          DateTime              @updatedAt
+  workspace          Workspace?            @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   channels           AgentChannel[]
   knowledgeBaseLinks AgentKnowledgeBase[]
   calls              Call[]
@@ -133,6 +215,7 @@ model AgentChannel {
 
 model KnowledgeBaseDocument {
   id            String               @id @default(cuid())
+  workspaceId   String?
   externalId    String?              @unique
   title         String
   type          KnowledgeBaseType
@@ -140,6 +223,7 @@ model KnowledgeBaseDocument {
   createdAt     DateTime             @default(now())
   updatedAt     DateTime             @updatedAt
   lastWebhookAt DateTime?
+  workspace     Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   tags          KnowledgeBaseTag[]
   agentLinks    AgentKnowledgeBase[]
   events        AgentEvent[]
@@ -167,6 +251,7 @@ model AgentKnowledgeBase {
 
 model Call {
   id               String      @id @default(cuid())
+  workspaceId      String?
   externalId       String?     @unique
   agentId          String
   contact          String
@@ -183,6 +268,7 @@ model Call {
   metadataJson     String?
   createdAt        DateTime    @default(now())
   updatedAt        DateTime    @updatedAt
+  workspace        Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   agent            Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
   transcript       Transcript? @relation("CallTranscript")
   events           AgentEvent[]
@@ -192,6 +278,7 @@ model Call {
 
 model MessageEvent {
   id           String      @id @default(cuid())
+  workspaceId  String?
   externalId   String?     @unique
   agentId      String
   transcriptId String?
@@ -204,6 +291,7 @@ model MessageEvent {
   metadataJson String?
   createdAt    DateTime    @default(now())
   updatedAt    DateTime    @updatedAt
+  workspace    Workspace?  @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   agent        Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
   transcript   Transcript? @relation(fields: [transcriptId], references: [id], onDelete: SetNull)
   events       AgentEvent[]
@@ -213,6 +301,7 @@ model MessageEvent {
 
 model Transcript {
   id               String              @id @default(cuid())
+  workspaceId      String?
   externalId       String?             @unique
   agentId          String
   channel          Channel
@@ -231,6 +320,7 @@ model Transcript {
   rawPayloadJson   String?
   createdAt        DateTime            @default(now())
   updatedAt        DateTime            @updatedAt
+  workspace        Workspace?          @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   agent            Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
   call             Call?               @relation("CallTranscript", fields: [callId], references: [id], onDelete: SetNull)
   entries          TranscriptEntry[]
@@ -265,6 +355,7 @@ model TranscriptEntry {
 
 model AgentEvent {
   id              String                 @id @default(cuid())
+  workspaceId     String?
   eventType       String
   summary         String
   severity        String                 @default("info")
@@ -276,6 +367,7 @@ model AgentEvent {
   payloadJson     String?
   occurredAt      DateTime
   processedAt     DateTime               @default(now())
+  workspace       Workspace?             @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   agent           Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
   call            Call?                  @relation(fields: [callId], references: [id], onDelete: SetNull)
   messageEvent    MessageEvent?          @relation(fields: [messageEventId], references: [id], onDelete: SetNull)
@@ -323,6 +415,7 @@ model Invoice {
 
 model WebhookEndpoint {
   id             String               @id @default(cuid())
+  workspaceId    String?
   url            String
   secret         String?
   status         String               @default("active")
@@ -331,6 +424,7 @@ model WebhookEndpoint {
   lastDeliveryAt DateTime?
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
+  workspace      Workspace?           @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
   events         WebhookEndpointEvent[]
   deliveries     WebhookDelivery[]
 }
@@ -364,4 +458,100 @@ model DashboardSnapshot {
   payloadJson String
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
+}
+
+model AdminUser {
+  id          String          @id @default(cuid())
+  email       String          @unique
+  name        String
+  role        AdminRole       @default(support)
+  initials    String
+  color       String          @default("#7b61ff")
+  isActive    Boolean         @default(true)
+  lastLoginAt DateTime?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+  auditEntries AdminAuditLog[]
+}
+
+model AdminAuditLog {
+  id          String   @id @default(cuid())
+  adminId     String?
+  action      String
+  targetType  String?
+  targetId    String?
+  summary     String
+  metadataJson String?
+  occurredAt  DateTime @default(now())
+  admin       AdminUser? @relation(fields: [adminId], references: [id], onDelete: SetNull)
+
+  @@index([occurredAt])
+}
+
+model Announcement {
+  id          String                @id @default(cuid())
+  title       String
+  body        String
+  severity    AnnouncementSeverity  @default(info)
+  audience    AnnouncementAudience  @default(all)
+  publishedAt DateTime              @default(now())
+  expiresAt   DateTime?
+  createdById String?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  targets     AnnouncementTarget[]
+}
+
+model AnnouncementTarget {
+  id             String       @id @default(cuid())
+  announcementId String
+  workspaceId    String
+  acknowledgedAt DateTime?
+  announcement   Announcement @relation(fields: [announcementId], references: [id], onDelete: Cascade)
+  workspace      Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([announcementId, workspaceId])
+}
+
+model ClientApiKey {
+  id           String    @id @default(cuid())
+  workspaceId  String
+  label        String
+  prefix       String
+  hashedSecret String
+  scopes       String    @default("read,write")
+  lastUsedAt   DateTime?
+  revokedAt    DateTime?
+  createdAt    DateTime  @default(now())
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId])
+}
+
+model SupportTicket {
+  id          String                @id @default(cuid())
+  workspaceId String
+  subject     String
+  body        String
+  status      SupportTicketStatus   @default(open)
+  priority    SupportTicketPriority @default(normal)
+  openedBy    String?
+  assignedTo  String?
+  resolvedAt  DateTime?
+  createdAt   DateTime              @default(now())
+  updatedAt   DateTime              @updatedAt
+  workspace   Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  messages    SupportTicketMessage[]
+
+  @@index([workspaceId, status])
+}
+
+model SupportTicketMessage {
+  id         String        @id @default(cuid())
+  ticketId   String
+  author     String
+  authorRole String        @default("client")
+  body       String
+  createdAt  DateTime      @default(now())
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
 }
