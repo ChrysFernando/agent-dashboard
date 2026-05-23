@@ -470,9 +470,23 @@ const WEBHOOKS = [
   { id: 'wh_002', url: 'https://hooks.zapier.com/hooks/xv29kdq2', events: ['call.completed'], status: 'Active' },
 ];
 
-Object.assign(window, {
-  AGENT_TYPES, AGENTS, FEED, VOLUME_30D, KB, TRANSCRIPTS,
-  BILLING_MONTHS, INVOICES, USAGE_ROWS,
-  OBJECTION_BAR, ISSUE_DONUT, CHANNEL_DONUT, CSAT_TREND, PEAK_HOURS, HEATMAP,
-  TEAM, WEBHOOKS,
-});
+// Merge live data (from /api/portal/aether-bundle) over the baked-in mock
+// values. Any live keys present override their mock counterparts; missing
+// live keys keep the mock so the UI is never blank.
+(function applyLive() {
+  var live = window.__LIVE_DATA || {};
+  var base = {
+    AGENT_TYPES: AGENT_TYPES, AGENTS: AGENTS, FEED: FEED, VOLUME_30D: VOLUME_30D,
+    KB: KB, TRANSCRIPTS: TRANSCRIPTS,
+    BILLING_MONTHS: BILLING_MONTHS, INVOICES: INVOICES, USAGE_ROWS: USAGE_ROWS,
+    OBJECTION_BAR: OBJECTION_BAR, ISSUE_DONUT: ISSUE_DONUT, CHANNEL_DONUT: CHANNEL_DONUT,
+    CSAT_TREND: CSAT_TREND, PEAK_HOURS: PEAK_HOURS, HEATMAP: HEATMAP,
+    TEAM: TEAM, WEBHOOKS: WEBHOOKS,
+  };
+  for (var k in base) {
+    var liveVal = live[k];
+    var hasLive = liveVal != null && (!Array.isArray(liveVal) || liveVal.length > 0);
+    window[k] = hasLive ? liveVal : base[k];
+  }
+  window.__AETHER_WORKSPACE = live.workspace || null;
+})();
