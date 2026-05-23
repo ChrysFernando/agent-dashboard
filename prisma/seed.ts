@@ -1,5 +1,6 @@
 import { AdminRole, AgentStatus, AgentType, AnnouncementAudience, AnnouncementSeverity, Channel, KnowledgeBaseType, NotificationEventType, SupportTicketPriority, SupportTicketStatus, TeamRole, TranscriptSentiment, TranscriptSpeaker, WorkspaceStatus } from "@prisma/client";
 
+import { generateRandomPassword, hashPassword } from "../src/lib/auth.js";
 import { env } from "../src/lib/env.js";
 import { prisma } from "../src/lib/prisma.js";
 import {
@@ -9,6 +10,13 @@ import {
   parseHourMinuteDurationToSeconds,
 } from "../src/lib/utils.js";
 import { loadDashboardSeedBundle } from "../src/services/dashboard-bundle.js";
+
+const SUPER_ADMIN_EMAIL = "chrys@taskforceai.tech";
+const SEEDED_CREDENTIALS: Array<{ role: string; email: string; password: string }> = [];
+
+function recordCredential(role: string, email: string, password: string) {
+  SEEDED_CREDENTIALS.push({ role, email, password });
+}
 
 function parseTranscriptTimestamp(input: string): Date {
   return new Date(`${input.replace(" ", "T")}:00.000Z`);
@@ -72,6 +80,7 @@ function safeDivideToMinutes(cents: number, rateCentsPerMinute: number): number 
 }
 
 async function resetDatabase() {
+  await prisma.session.deleteMany();
   await prisma.supportTicketMessage.deleteMany();
   await prisma.supportTicket.deleteMany();
   await prisma.clientApiKey.deleteMany();
@@ -100,6 +109,9 @@ async function resetDatabase() {
   await prisma.workspace.deleteMany();
   await prisma.plan.deleteMany();
   await prisma.dashboardSnapshot.deleteMany();
+  await prisma.incident.deleteMany();
+  await prisma.serviceStatus.deleteMany();
+  await prisma.mrrMovement.deleteMany();
 }
 
 async function main() {
@@ -120,6 +132,12 @@ async function main() {
       maxKnowledgeDocuments: 10,
       isPublic: true,
       isDefault: false,
+      templateModel: "concise",
+      templateVoice: "Voice A — Professional Male",
+      templateChannel: "Voice",
+      voiceCostPerMinute: 0.18,
+      aiCostPerMessage: 4.2,
+      callCostPerMinute: 0.022,
     },
   });
   const planScale = await prisma.plan.create({
@@ -136,6 +154,12 @@ async function main() {
       maxKnowledgeDocuments: 100,
       isPublic: true,
       isDefault: true,
+      templateModel: "balanced",
+      templateVoice: "Voice B — Warm Female",
+      templateChannel: "Voice + WhatsApp",
+      voiceCostPerMinute: 0.22,
+      aiCostPerMessage: 5.0,
+      callCostPerMinute: 0.022,
     },
   });
   const planEnterprise = await prisma.plan.create({
@@ -152,6 +176,12 @@ async function main() {
       maxKnowledgeDocuments: null,
       isPublic: false,
       isDefault: false,
+      templateModel: "detailed",
+      templateVoice: "Voice C — Neutral Female",
+      templateChannel: "Voice + WhatsApp",
+      voiceCostPerMinute: 0.26,
+      aiCostPerMessage: 5.8,
+      callCostPerMinute: 0.018,
     },
   });
 
@@ -164,6 +194,7 @@ async function main() {
       contactEmail: "ops@acme.test",
       contactPhone: "+1 415 555 0142",
       timezone: env.workspace.timezone,
+      country: "Sri Lanka",
       defaultLanguage: env.workspace.defaultLanguage,
       retentionDays: 90,
       status: WorkspaceStatus.active,
@@ -181,6 +212,7 @@ async function main() {
       contactEmail: "priya@heliohealth.test",
       contactPhone: "+1 628 555 0190",
       timezone: "America/Los_Angeles (UTC-08:00)",
+      country: "United States",
       defaultLanguage: "English (US)",
       retentionDays: 365,
       status: WorkspaceStatus.active,
@@ -198,6 +230,7 @@ async function main() {
       contactEmail: "marcus@orbitlogi.test",
       contactPhone: "+44 20 7946 0331",
       timezone: "Europe/London (UTC+00:00)",
+      country: "United Kingdom",
       defaultLanguage: "English (UK)",
       retentionDays: 60,
       status: WorkspaceStatus.trial,
@@ -215,6 +248,7 @@ async function main() {
       contactName: "Ava Chen",
       contactEmail: "ava@zephyr.test",
       timezone: "Asia/Singapore (UTC+08:00)",
+      country: "Singapore",
       defaultLanguage: "English (SG)",
       retentionDays: 90,
       status: WorkspaceStatus.suspended,
@@ -247,17 +281,25 @@ async function main() {
     ],
   });
 
-  await prisma.teamMember.createMany({
-    data: bundle.TEAM.map((member) => ({
-      id: createPrefixedId("team"),
-      workspaceId: DEFAULT_WORKSPACE_ID,
-      name: member.name,
-      email: member.email,
-      role: member.role.toLowerCase() as TeamRole,
-      initials: member.initials,
-      color: member.color,
-    })),
-  });
+  // Team members get bcrypt-hashed passwords so the client portal login works.
+  // The plaintext is generated once per member and printed at the end so a
+  // human can capture them.
+  for (const member of bundle.TEAM) {
+    const password = generateRandomPassword(16);
+    await prisma.teamMember.create({
+      data: {
+        id: createPrefixedId("team"),
+        workspaceId: DEFAULT_WORKSPACE_ID,
+        name: member.name,
+        email: member.email.toLowerCase(),
+        role: member.role.toLowerCase() as TeamRole,
+        initials: member.initials,
+        color: member.color,
+        passwordHash: await hashPassword(password),
+      },
+    });
+    recordCredential(`team:${member.role}`, member.email.toLowerCase(), password);
+  }
 
   for (const agent of bundle.AGENTS) {
     await prisma.agent.create({
@@ -526,19 +568,27 @@ async function main() {
     });
   }
 
-  // ----- Admin users (super-admin console operators)
+  // ----- Admin users (super-admin console operators).
+  // The super admin chrys@taskforceai.tech is created here with a generated
+  // password printed at the end. All other admins are also seeded with
+  // generated passwords so they can sign in immediately for dev/demo.
+  const superAdminPassword = generateRandomPassword(20);
   const adminRoot = await prisma.adminUser.create({
     data: {
       id: "admin_root",
-      email: "owner@aether.test",
-      name: "Sentinel Operator",
+      email: SUPER_ADMIN_EMAIL,
+      name: "Chrys (Super Admin)",
       role: AdminRole.super_admin,
-      initials: "SO",
+      initials: "CS",
       color: "#00d4ff",
       isActive: true,
-      lastLoginAt: new Date(Date.now() - 90 * 60_000),
+      passwordHash: await hashPassword(superAdminPassword),
+      passwordChangedAt: new Date(),
     },
   });
+  recordCredential("super_admin", SUPER_ADMIN_EMAIL, superAdminPassword);
+
+  const supportPassword = generateRandomPassword(16);
   await prisma.adminUser.create({
     data: {
       id: "admin_support",
@@ -548,9 +598,13 @@ async function main() {
       initials: "TM",
       color: "#7b61ff",
       isActive: true,
-      lastLoginAt: new Date(Date.now() - 4 * 3_600_000),
+      passwordHash: await hashPassword(supportPassword),
+      passwordChangedAt: new Date(),
     },
   });
+  recordCredential("admin:support", "support@aether.test", supportPassword);
+
+  const billingPassword = generateRandomPassword(16);
   await prisma.adminUser.create({
     data: {
       id: "admin_billing",
@@ -560,9 +614,11 @@ async function main() {
       initials: "GA",
       color: "#00e5a0",
       isActive: true,
-      lastLoginAt: new Date(Date.now() - 18 * 3_600_000),
+      passwordHash: await hashPassword(billingPassword),
+      passwordChangedAt: new Date(),
     },
   });
+  recordCredential("admin:billing", "billing@aether.test", billingPassword);
 
   // ----- Audit log seed
   const auditSeeds: Array<{
@@ -718,20 +774,21 @@ async function main() {
       { key: "analytics.csatTrend", payloadJson: JSON.stringify(bundle.CSAT_TREND) },
       { key: "analytics.peakHours", payloadJson: JSON.stringify(bundle.PEAK_HOURS) },
       { key: "analytics.heatmap", payloadJson: JSON.stringify(bundle.HEATMAP) },
-      {
-        key: "analytics.scriptPerformance",
-        payloadJson: JSON.stringify([
-          { name: "Pattern Interrupt v3", connect: 38.1, interest: 14.2, best: true },
-          { name: "Direct Value Prop", connect: 31.5, interest: 11.8 },
-          { name: "Question-First", connect: 29, interest: 10.4 },
-          { name: "Referral Mention", connect: 35.7, interest: 13.1 },
-          { name: "Quick Pitch v1", connect: 22.3, interest: 7.9, worst: true },
-        ]),
-      },
     ],
   });
 
-  console.log("Seed completed.");
+  console.log("\nSeed completed.\n");
+  console.log("=".repeat(72));
+  console.log("Seeded credentials — SAVE THESE NOW. They are only printed once.");
+  console.log("=".repeat(72));
+  for (const cred of SEEDED_CREDENTIALS) {
+    console.log(`  [${cred.role.padEnd(16)}] ${cred.email.padEnd(36)}  ${cred.password}`);
+  }
+  console.log("=".repeat(72));
+  console.log("Sign in:");
+  console.log("  Admin console → http://localhost:3000/admin/login");
+  console.log("  Client portal → http://localhost:3000/portal/login");
+  console.log("=".repeat(72));
 }
 
 function normalizeCallStatus(outcome: string): string {

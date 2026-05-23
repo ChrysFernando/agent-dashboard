@@ -12,6 +12,12 @@ CREATE TABLE "Plan" (
     "maxKnowledgeDocuments" INTEGER,
     "isPublic" BOOLEAN NOT NULL DEFAULT true,
     "isDefault" BOOLEAN NOT NULL DEFAULT false,
+    "templateModel" TEXT,
+    "templateVoice" TEXT,
+    "templateChannel" TEXT,
+    "voiceCostPerMinute" REAL,
+    "aiCostPerMessage" REAL,
+    "callCostPerMinute" REAL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
 );
@@ -25,6 +31,7 @@ CREATE TABLE "Workspace" (
     "contactEmail" TEXT,
     "contactPhone" TEXT,
     "timezone" TEXT NOT NULL,
+    "country" TEXT,
     "defaultLanguage" TEXT NOT NULL,
     "retentionDays" INTEGER,
     "status" TEXT NOT NULL DEFAULT 'active',
@@ -56,6 +63,8 @@ CREATE TABLE "TeamMember" (
     "role" TEXT NOT NULL,
     "initials" TEXT NOT NULL,
     "color" TEXT NOT NULL,
+    "passwordHash" TEXT,
+    "lastLoginAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "TeamMember_workspaceId_fkey" FOREIGN KEY ("workspaceId") REFERENCES "Workspace" ("id") ON DELETE CASCADE ON UPDATE CASCADE
@@ -324,6 +333,8 @@ CREATE TABLE "AdminUser" (
     "initials" TEXT NOT NULL,
     "color" TEXT NOT NULL DEFAULT '#7b61ff',
     "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "passwordHash" TEXT,
+    "passwordChangedAt" DATETIME,
     "lastLoginAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
@@ -407,6 +418,56 @@ CREATE TABLE "SupportTicketMessage" (
     CONSTRAINT "SupportTicketMessage_ticketId_fkey" FOREIGN KEY ("ticketId") REFERENCES "SupportTicket" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "Session" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "subjectType" TEXT NOT NULL,
+    "subjectId" TEXT NOT NULL,
+    "workspaceId" TEXT,
+    "expiresAt" DATETIME NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "lastSeenAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "userAgent" TEXT,
+    "ipAddress" TEXT
+);
+
+-- CreateTable
+CREATE TABLE "ServiceStatus" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "name" TEXT NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'operational',
+    "uptimePercent" REAL NOT NULL DEFAULT 100,
+    "latencyMs" INTEGER NOT NULL DEFAULT 0,
+    "lastIncidentAt" DATETIME,
+    "sortOrder" INTEGER NOT NULL DEFAULT 0,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "Incident" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "serviceId" TEXT,
+    "occurredAt" DATETIME NOT NULL,
+    "severity" TEXT NOT NULL DEFAULT 'minor',
+    "durationMinutes" INTEGER,
+    "status" TEXT NOT NULL DEFAULT 'ongoing',
+    "description" TEXT NOT NULL,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Incident_serviceId_fkey" FOREIGN KEY ("serviceId") REFERENCES "ServiceStatus" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "MrrMovement" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "periodStart" DATETIME NOT NULL,
+    "kind" TEXT NOT NULL,
+    "amountCents" INTEGER NOT NULL,
+    "notes" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "Plan_slug_key" ON "Plan"("slug");
 
@@ -487,4 +548,22 @@ CREATE INDEX "ClientApiKey_workspaceId_idx" ON "ClientApiKey"("workspaceId");
 
 -- CreateIndex
 CREATE INDEX "SupportTicket_workspaceId_status_idx" ON "SupportTicket"("workspaceId", "status");
+
+-- CreateIndex
+CREATE INDEX "Session_subjectType_subjectId_idx" ON "Session"("subjectType", "subjectId");
+
+-- CreateIndex
+CREATE INDEX "Session_expiresAt_idx" ON "Session"("expiresAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "ServiceStatus_name_key" ON "ServiceStatus"("name");
+
+-- CreateIndex
+CREATE INDEX "Incident_occurredAt_idx" ON "Incident"("occurredAt");
+
+-- CreateIndex
+CREATE INDEX "MrrMovement_periodStart_idx" ON "MrrMovement"("periodStart");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "MrrMovement_periodStart_kind_key" ON "MrrMovement"("periodStart", "kind");
 

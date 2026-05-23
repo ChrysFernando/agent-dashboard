@@ -525,14 +525,7 @@ export async function getAnalytics() {
       csatTrend: csatTrend ?? [],
       peakHours: peakHours ?? [],
       heatmap: heatmap ?? [],
-      scriptPerformance:
-        scriptPerformance ?? [
-          { name: "Pattern Interrupt v3", connect: 38.1, interest: 14.2, best: true },
-          { name: "Direct Value Prop", connect: 31.5, interest: 11.8 },
-          { name: "Question-First", connect: 29, interest: 10.4 },
-          { name: "Referral Mention", connect: 35.7, interest: 13.1 },
-          { name: "Quick Pitch v1", connect: 22.3, interest: 7.9, worst: true },
-        ],
+      scriptPerformance: scriptPerformance ?? [],
     },
   };
 }

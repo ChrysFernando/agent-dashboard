@@ -2,13 +2,14 @@
  * Bundle shim builders — return live data in the exact shapes the original
  * Aether (portal) and Sentinel (admin) bundles expect.
  *
- * Why: the bundled UIs we serve from /portal and /admin are the artifact
- * outputs the user designed; their mock-data layer expects a specific schema.
- * Rather than rewrite all the React pages, we satisfy that schema from the DB.
+ * No hardcoded data. Every value is either:
+ *   - Read directly from the database, or
+ *   - Derived deterministically from database rows.
+ *
+ * If a section has no data in the DB (e.g. no incidents logged), the UI
+ * renders an empty state.
  */
-import { createHash } from "node:crypto";
-
-import { Prisma, WorkspaceStatus } from "@prisma/client";
+import { WorkspaceStatus } from "@prisma/client";
 
 import { env } from "../lib/env.js";
 import { prisma } from "../lib/prisma.js";
@@ -24,9 +25,7 @@ import {
 } from "../lib/utils.js";
 
 // --------------------------------------------------------------------
-// Aether portal bundle: AGENTS, FEED, VOLUME_30D, KB, TRANSCRIPTS,
-// BILLING_MONTHS, INVOICES, USAGE_ROWS, OBJECTION_BAR, ISSUE_DONUT,
-// CHANNEL_DONUT, CSAT_TREND, PEAK_HOURS, HEATMAP, TEAM, WEBHOOKS
+// Aether portal bundle
 // --------------------------------------------------------------------
 
 const AGENT_TYPE_LABELS: Record<string, { label: string; color: string; desc: string; icon: string }> = {
@@ -35,8 +34,6 @@ const AGENT_TYPE_LABELS: Record<string, { label: string; color: string; desc: st
   booking: { label: "Booking Agent", color: "violet", desc: "Calendar reservations & confirmations", icon: "calendar" },
   coldcall: { label: "Cold Call Agent", color: "amber", desc: "First-touch outreach & lead screening", icon: "flag" },
 };
-
-const TEAM_COLOR_PALETTE = ["cyan", "violet", "emerald", "amber", "rose"];
 
 function outcomePill(outcome: string | null | undefined): string {
   const n = normalizeOutcome(outcome) ?? "";
@@ -80,9 +77,8 @@ function whenLabel(date: Date, now = new Date()): string {
   return `${Math.floor(diff / 86_400)}d ago`;
 }
 
-function teamColor(index: number, role: string): string {
-  if (role === "owner") return "cyan";
-  return TEAM_COLOR_PALETTE[index % TEAM_COLOR_PALETTE.length];
+function teamColor(role: string, fallback: string): string {
+  return role === "owner" ? "cyan" : fallback || "violet";
 }
 
 function mapKbType(type: string): string {
@@ -141,7 +137,6 @@ export async function getAetherBundle(workspaceId: string) {
     ]);
 
   const todayStart = startOfDay();
-
   const AGENT_TYPES = AGENT_TYPE_LABELS;
 
   const AGENTS = agents.map((agent) => {
@@ -160,9 +155,9 @@ export async function getAetherBundle(workspaceId: string) {
       conversion,
       avgDuration: clockFromSeconds(avgSec),
       personality: agent.personality ?? "",
-      language: agent.language ?? "English",
+      language: agent.language ?? "",
       greeting: agent.greeting ?? "",
-      rating: agent.rating ?? 4.5,
+      rating: agent.rating ?? 0,
       kb: agent.knowledgeBaseLinks.map((link) => link.knowledgeBaseId),
     };
   });
@@ -183,10 +178,15 @@ export async function getAetherBundle(workspaceId: string) {
     icon: feedIcon(event.eventType),
   }));
 
-  const volume30dSnapshot = dashboardSnapshots.find((snapshot) => snapshot.key === "overview.volume30d");
-  const VOLUME_30D = volume30dSnapshot
-    ? (JSON.parse(volume30dSnapshot.payloadJson) as Array<{ day: number; label: string; voice: number; whatsapp: number }>)
-    : Array.from({ length: 30 }, (_, i) => ({ day: i + 1, label: `D${i + 1}`, voice: 0, whatsapp: 0 }));
+  const VOLUME_30D =
+    (dashboardSnapshots.find((snapshot) => snapshot.key === "overview.volume30d")?.payloadJson &&
+      (JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "overview.volume30d")!.payloadJson) as Array<{
+        day: number;
+        label: string;
+        voice: number;
+        whatsapp: number;
+      }>)) ||
+    [];
 
   const KB = kb.map((doc) => ({
     id: doc.id,
@@ -211,7 +211,7 @@ export async function getAetherBundle(workspaceId: string) {
     sentiment: transcript.sentiment,
     metrics: {
       responseTime: transcript.responseTimeMs ? `${(transcript.responseTimeMs / 1000).toFixed(1)}s` : "—",
-      sentimentScore: transcript.sentimentScore ?? 0.5,
+      sentimentScore: transcript.sentimentScore ?? 0,
       resolution: transcript.resolution ?? (isSuccessfulOutcome(transcript.outcome) ? "Yes" : "No"),
       followUp: transcript.followUpRequired ? "Yes" : "No",
     },
@@ -223,19 +223,11 @@ export async function getAetherBundle(workspaceId: string) {
     })),
   }));
 
-  const monthlyMaps = new Map<string, { voice: number; ai: number; call: number }>();
-  for (const snap of snapshots) {
-    monthlyMaps.set(snap.label, {
-      voice: Math.round(snap.voiceMinutes * (env.billing.voiceAgentRateCentsPerMinute / 100)),
-      ai: Math.round(snap.aiMinutes * (env.billing.aiAgentRateCentsPerMinute / 100)),
-      call: Math.round(snap.callMinutes * (env.billing.callRateCentsPerMinute / 100)),
-    });
-  }
   const BILLING_MONTHS = snapshots.map((snap) => ({
     m: snap.label,
-    voice: monthlyMaps.get(snap.label)?.voice ?? 0,
-    ai: monthlyMaps.get(snap.label)?.ai ?? 0,
-    call: monthlyMaps.get(snap.label)?.call ?? 0,
+    voice: Math.round(snap.voiceMinutes * (env.billing.voiceAgentRateCentsPerMinute / 100)),
+    ai: Math.round(snap.aiMinutes * (env.billing.aiAgentRateCentsPerMinute / 100)),
+    call: Math.round(snap.callMinutes * (env.billing.callRateCentsPerMinute / 100)),
   }));
 
   const INVOICES = invoices.map((invoice) => ({
@@ -265,31 +257,27 @@ export async function getAetherBundle(workspaceId: string) {
     };
   });
 
-  const OBJECTION_BAR = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.objectionBar")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.objectionBar")!.payloadJson)
-    : []) as Array<{ label: string; value: number }>;
-  const ISSUE_DONUT = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.issueDonut")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.issueDonut")!.payloadJson)
-    : []) as Array<{ name: string; value: number; fill: string }>;
-  const CHANNEL_DONUT = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.channelDonut")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.channelDonut")!.payloadJson)
-    : []) as Array<{ name: string; value: number; fill: string }>;
-  const CSAT_TREND = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.csatTrend")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.csatTrend")!.payloadJson)
-    : []) as Array<{ week: string; csat: number }>;
-  const PEAK_HOURS = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.peakHours")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.peakHours")!.payloadJson)
-    : []) as Array<{ hour: string; calls: number }>;
-  const HEATMAP = (dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.heatmap")?.payloadJson
-    ? JSON.parse(dashboardSnapshots.find((snapshot) => snapshot.key === "analytics.heatmap")!.payloadJson)
-    : []) as number[][];
+  const readSnapshot = <T>(key: string): T | null => {
+    const found = dashboardSnapshots.find((snapshot) => snapshot.key === key);
+    return found ? (JSON.parse(found.payloadJson) as T) : null;
+  };
 
-  const TEAM = team.map((member, index) => ({
+  const OBJECTION_BAR =
+    readSnapshot<Array<{ label: string; value: number }>>("analytics.objectionBar") ?? [];
+  const ISSUE_DONUT =
+    readSnapshot<Array<{ name: string; value: number; fill: string }>>("analytics.issueDonut") ?? [];
+  const CHANNEL_DONUT =
+    readSnapshot<Array<{ name: string; value: number; fill: string }>>("analytics.channelDonut") ?? [];
+  const CSAT_TREND = readSnapshot<Array<{ week: string; csat: number }>>("analytics.csatTrend") ?? [];
+  const PEAK_HOURS = readSnapshot<Array<{ hour: string; calls: number }>>("analytics.peakHours") ?? [];
+  const HEATMAP = readSnapshot<number[][]>("analytics.heatmap") ?? [];
+
+  const TEAM = team.map((member) => ({
     name: member.name,
     email: member.email,
     role: member.role.charAt(0).toUpperCase() + member.role.slice(1),
     initials: member.initials,
-    color: teamColor(index, member.role),
+    color: teamColor(member.role, member.color),
   }));
 
   const WEBHOOKS = webhooks.map((endpoint) => ({
@@ -300,7 +288,7 @@ export async function getAetherBundle(workspaceId: string) {
   }));
 
   return {
-    workspace: { id: workspace.id, name: workspace.name, plan: workspace.plan?.name ?? "Scale" },
+    workspace: { id: workspace.id, name: workspace.name, plan: workspace.plan?.name ?? "—" },
     AGENT_TYPES,
     AGENTS,
     FEED,
@@ -322,10 +310,7 @@ export async function getAetherBundle(workspaceId: string) {
 }
 
 // --------------------------------------------------------------------
-// Sentinel admin bundle: CLIENTS, REVENUE_TREND, CLIENT_BREAKDOWN,
-// ACTIVITY_FEED, PAYMENTS, OVERDUE, TICKETS, AUDIT_LOG, ADMIN_USERS,
-// SERVICES, INCIDENTS, AGENT_TEMPLATES, EARNINGS_MONTHLY,
-// REVENUE_BY_PLAN, MRR_MOVEMENT, CLIENT_INVOICES
+// Sentinel admin bundle
 // --------------------------------------------------------------------
 
 const SENTINEL_STATUS_MAP: Record<WorkspaceStatus, string> = {
@@ -336,31 +321,13 @@ const SENTINEL_STATUS_MAP: Record<WorkspaceStatus, string> = {
 };
 
 function sentinelClientCode(workspaceId: string): string {
-  // Deterministic 6-char ID from the workspace id. Hashing avoids collisions
-  // that happened with strip-non-hex (e.g. ws_helio and ws_zephyr both reduced
-  // to "E" → padded to E00000, producing duplicate React keys).
-  const hex = createHash("sha1").update(workspaceId).digest("hex").toUpperCase().slice(0, 6);
-  return `C-${hex}`;
-}
-
-function countryFromTimezone(timezone: string): string {
-  const tz = timezone.toLowerCase();
-  if (tz.includes("colombo")) return "Sri Lanka";
-  if (tz.includes("singapore")) return "Singapore";
-  if (tz.includes("london")) return "United Kingdom";
-  if (tz.includes("paris")) return "France";
-  if (tz.includes("los_angeles")) return "United States";
-  if (tz.includes("new_york")) return "United States";
-  if (tz.includes("tokyo")) return "Japan";
-  if (tz.includes("mexico")) return "Mexico";
-  if (tz.includes("oslo")) return "Norway";
-  if (tz.includes("kolkata")) return "India";
-  if (tz.includes("lagos")) return "Nigeria";
-  if (tz.includes("dubai")) return "UAE";
-  if (tz.includes("lisbon")) return "Portugal";
-  if (tz.includes("vancouver")) return "Canada";
-  if (tz.includes("chicago")) return "United States";
-  return "Global";
+  // Deterministic 6-char ID from a hash of the workspace id.
+  // Avoids collisions when stripped to hex characters.
+  let h = 0;
+  for (let i = 0; i < workspaceId.length; i += 1) {
+    h = (h * 31 + workspaceId.charCodeAt(i)) >>> 0;
+  }
+  return `C-${h.toString(16).toUpperCase().padStart(6, "0").slice(0, 6)}`;
 }
 
 function sentinelPaymentStatus(invoiceStatus: string, daysSinceIssue: number): string {
@@ -394,12 +361,45 @@ function sentinelPriority(priority: string): string {
   return priority.charAt(0).toUpperCase() + priority.slice(1);
 }
 
+function serviceStatusLabel(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
+}
+
+function incidentSeverityLabel(severity: string): string {
+  return severity.charAt(0).toUpperCase() + severity.slice(1);
+}
+
+function formatDurationMinutes(minutes: number | null | undefined): string {
+  if (minutes == null) return "—";
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${String(m).padStart(2, "0")}m`;
+}
+
 export async function getSentinelBundle() {
   const monthStart = startOfCurrentMonth();
-  const [workspaces, plans, invoices, tickets, audit, admins, announcements] = await Promise.all([
+  const now = new Date();
+
+  const [
+    workspaces,
+    plans,
+    invoices,
+    tickets,
+    audit,
+    admins,
+    announcements,
+    services,
+    incidents,
+    mrrMovements,
+  ] = await Promise.all([
     prisma.workspace.findMany({ include: { plan: true, _count: { select: { agents: true } } } }),
     prisma.plan.findMany({ orderBy: { monthlyFeeCents: "asc" } }),
-    prisma.invoice.findMany({ orderBy: { issuedAt: "desc" }, take: 40, include: { workspace: { select: { name: true } } } }),
+    prisma.invoice.findMany({
+      orderBy: { issuedAt: "desc" },
+      take: 40,
+      include: { workspace: { select: { name: true } } },
+    }),
     prisma.supportTicket.findMany({
       include: { workspace: { select: { name: true } }, messages: true },
       orderBy: { createdAt: "desc" },
@@ -408,6 +408,16 @@ export async function getSentinelBundle() {
     prisma.adminAuditLog.findMany({ orderBy: { occurredAt: "desc" }, take: 60, include: { admin: true } }),
     prisma.adminUser.findMany({ orderBy: { createdAt: "asc" } }),
     prisma.announcement.findMany({ orderBy: { publishedAt: "desc" }, take: 20 }),
+    prisma.serviceStatus.findMany({ orderBy: [{ sortOrder: "asc" }, { name: "asc" }] }),
+    prisma.incident.findMany({
+      orderBy: { occurredAt: "desc" },
+      take: 20,
+      include: { service: { select: { name: true } } },
+    }),
+    prisma.mrrMovement.findMany({
+      where: { periodStart: { gte: new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - 1, 1)) } },
+      orderBy: [{ periodStart: "desc" }, { kind: "asc" }],
+    }),
   ]);
 
   const PLATFORM_NAME = "Sentinel";
@@ -423,7 +433,7 @@ export async function getSentinelBundle() {
       company: workspace.name,
       contact: workspace.contactName ?? "—",
       email: workspace.contactEmail ?? "—",
-      country: countryFromTimezone(workspace.timezone),
+      country: workspace.country ?? "—",
       plan: workspace.plan?.name ?? "Custom",
       status: SENTINEL_STATUS_MAP[workspace.status],
       mrr: centsToNumber(workspace.plan?.monthlyFeeCents ?? 0),
@@ -436,9 +446,8 @@ export async function getSentinelBundle() {
     };
   });
 
-  // ---- Revenue trend: 12 month series, derive from billingUsageSnapshots invoiced/collected by month
+  // Revenue trend: actual monthly invoiced and collected from the invoice table.
   const monthLabels: string[] = [];
-  const now = new Date();
   for (let i = 11; i >= 0; i -= 1) {
     const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1));
     monthLabels.push(d.toLocaleString("en-US", { month: "short", year: "2-digit" }).replace(" ", " '"));
@@ -447,38 +456,55 @@ export async function getSentinelBundle() {
   const REVENUE_TREND = monthLabels.map((label, index) => {
     const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (11 - index), 1));
     const nextDate = new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 1, 1));
-    const matching = allInvoices.filter((invoice) => invoice.issuedAt >= monthDate && invoice.issuedAt < nextDate);
+    const matching = allInvoices.filter(
+      (invoice) => invoice.issuedAt >= monthDate && invoice.issuedAt < nextDate,
+    );
     const invoiced = matching.reduce((total, invoice) => total + invoice.amountCents, 0);
     const collected = matching
       .filter((invoice) => invoice.status === "paid")
       .reduce((total, invoice) => total + invoice.amountCents, 0);
-    const mrr = workspaces.reduce((total, ws) => total + (ws.plan?.monthlyFeeCents ?? 0), 0);
+    const mrr = workspaces.reduce(
+      (total, ws) =>
+        total + ((ws.createdAt <= nextDate && ws.status !== "archived" ? ws.plan?.monthlyFeeCents : 0) ?? 0),
+      0,
+    );
     return { month: label, mrr: centsToNumber(mrr), collected: centsToNumber(collected || invoiced) };
   });
 
   const CLIENT_BREAKDOWN = [
     { name: "Active", count: CLIENTS.filter((client) => client.status === "Active").length, color: "#10b981" },
     { name: "Trial", count: CLIENTS.filter((client) => client.status === "Trial").length, color: "#f59e0b" },
-    { name: "Overdue", count: 0, color: "#f43f5e" },
+    {
+      name: "Overdue",
+      count: invoices.filter((invoice) => invoice.status === "overdue").length,
+      color: "#f43f5e",
+    },
     { name: "Blocked", count: CLIENTS.filter((client) => client.status === "Blocked").length, color: "#6b7280" },
     { name: "Churned", count: CLIENTS.filter((client) => client.status === "Churned").length, color: "#4b5563" },
   ];
-  CLIENT_BREAKDOWN[2].count = invoices.filter((invoice) => invoice.status === "overdue").length;
 
   // The dashboard page's ACTIVITY_META map only knows 7 action keys
   // (payment_received, signup, payment_failed, agent_created, ticket_opened,
   // account_blocked, plan_upgrade). Map our richer set into those buckets,
   // otherwise <ActivityRow> crashes on `meta.cls` when meta is undefined.
-  const mapToActivityKey = (action: string): "payment_received" | "signup" | "payment_failed" | "agent_created" | "ticket_opened" | "account_blocked" | "plan_upgrade" => {
+  const mapToActivityKey = (
+    action: string,
+  ): "payment_received" | "signup" | "payment_failed" | "agent_created" | "ticket_opened" | "account_blocked" | "plan_upgrade" => {
     const a = action.toLowerCase();
     if (a.includes("client.created") || a.includes("signup")) return "signup";
-    if (a.includes("suspended") || a.includes("blocked") || a.includes("deleted") || a.includes("deactivated") || a.includes("retracted")) return "account_blocked";
+    if (
+      a.includes("suspended") ||
+      a.includes("blocked") ||
+      a.includes("deleted") ||
+      a.includes("deactivated") ||
+      a.includes("retracted")
+    )
+      return "account_blocked";
     if (a.includes("payment.failed") || a.includes("failed")) return "payment_failed";
     if (a.includes("payment") || a.includes("invoice")) return "payment_received";
     if (a.includes("agent")) return "agent_created";
     if (a.includes("ticket")) return "ticket_opened";
     if (a.includes("plan")) return "plan_upgrade";
-    // Default: treat as a neutral "agent created" so the row renders.
     return "agent_created";
   };
 
@@ -503,7 +529,9 @@ export async function getSentinelBundle() {
       date: invoice.issuedAt.toISOString().slice(0, 10),
       amount: centsToNumber(invoice.amountCents),
       plan: ws?.plan?.name ?? "—",
-      method: invoice.amountCents > 500_000 ? "ACH ****4421" : "Card ****" + invoice.id.slice(-4),
+      // No fake payment method strings — show actual payment metadata if
+      // ever wired up; otherwise dash.
+      method: "—",
       status,
     };
   });
@@ -540,10 +568,15 @@ export async function getSentinelBundle() {
     return {
       ts: entry.occurredAt.toISOString().slice(0, 19).replace("T", " "),
       admin: entry.admin?.name ?? "System",
-      action: entry.action.split(".").map((piece) => piece.charAt(0).toUpperCase() + piece.slice(1)).join(" "),
+      action: entry.action
+        .split(".")
+        .map((piece) => piece.charAt(0).toUpperCase() + piece.slice(1))
+        .join(" "),
       type: sentinelAuditType(entry.action),
       target: targetWorkspace?.name ?? entry.targetId ?? "—",
-      ip: entry.admin ? `10.42.18.${(entry.admin.id.charCodeAt(0) % 200) + 1}` : "system",
+      // No synthetic IPs. Real IPs would come from a future column on the
+      // audit log; until then we surface that it's unknown.
+      ip: "—",
       details: entry.summary,
     };
   });
@@ -552,65 +585,132 @@ export async function getSentinelBundle() {
     name: admin.name,
     email: admin.email,
     role:
-      admin.role === "super_admin" ? "Super Admin" :
-      admin.role === "support" ? "Support" :
-      admin.role === "billing" ? "Finance" : "Operations",
+      admin.role === "super_admin"
+        ? "Super Admin"
+        : admin.role === "support"
+          ? "Support"
+          : admin.role === "billing"
+            ? "Finance"
+            : "Operations",
     lastLogin: admin.lastLoginAt ? formatRelativeDate(admin.lastLoginAt) : "Never",
     status: admin.isActive ? "Active" : "Revoked",
   }));
 
-  // Synthetic platform health (no real service-status DB; deterministic snapshot)
-  const SERVICES = [
-    { name: "Voice Processing Engine", status: "Operational", uptime: 99.98, latency: 142, lastIncident: "12 days ago" },
-    { name: "AI Language Processing", status: "Operational", uptime: 99.99, latency: 218, lastIncident: "28 days ago" },
-    { name: "Message Delivery (WhatsApp)", status: "Operational", uptime: 99.94, latency: 380, lastIncident: "4 days ago" },
-    { name: "Call Routing Service", status: "Operational", uptime: 99.97, latency: 88, lastIncident: "9 days ago" },
-    { name: "Billing & Payments", status: "Operational", uptime: 100.0, latency: 64, lastIncident: "—" },
-    { name: "Client API Gateway", status: "Operational", uptime: 99.96, latency: 41, lastIncident: "18 days ago" },
-    { name: "Knowledge Base Service", status: "Degraded", uptime: 99.82, latency: 612, lastIncident: "2h ago" },
-    { name: "Transcript Storage", status: "Operational", uptime: 99.99, latency: 102, lastIncident: "30+ days ago" },
-  ];
-  const INCIDENTS = [
-    { date: new Date(Date.now() - 2 * 3_600_000).toISOString().slice(0, 16).replace("T", " "), service: "Knowledge Base Service", severity: "Minor", duration: "ongoing", status: "Ongoing", description: "Elevated read latency on shard kb-eu-2" },
-    { date: new Date(Date.now() - 4 * 86_400_000).toISOString().slice(0, 16).replace("T", " "), service: "Message Delivery", severity: "Major", duration: "47m", status: "Resolved", description: "WhatsApp BSP outage — failover engaged" },
-    { date: new Date(Date.now() - 12 * 86_400_000).toISOString().slice(0, 16).replace("T", " "), service: "Voice Processing", severity: "Minor", duration: "14m", status: "Resolved", description: "Regional ASR node restart" },
-  ];
+  // Real service health from the ServiceStatus table. Empty unless ops
+  // populates it via the DB or future admin endpoint.
+  const SERVICES = services.map((service) => ({
+    name: service.name,
+    status: serviceStatusLabel(service.status),
+    uptime: service.uptimePercent,
+    latency: service.latencyMs,
+    lastIncident: service.lastIncidentAt ? formatRelativeDate(service.lastIncidentAt) : "—",
+  }));
 
-  const AGENT_TEMPLATES = plans.map((plan, index) => ({
+  const INCIDENTS = incidents.map((incident) => ({
+    date: incident.occurredAt.toISOString().slice(0, 16).replace("T", " "),
+    service: incident.service?.name ?? "—",
+    severity: incidentSeverityLabel(incident.severity),
+    duration: incident.status === "ongoing" ? "ongoing" : formatDurationMinutes(incident.durationMinutes),
+    status: incident.status.charAt(0).toUpperCase() + incident.status.slice(1),
+    description: incident.description,
+  }));
+
+  // Plan-driven agent templates. Costs and template metadata are read from
+  // the Plan row directly — no hardcoded prices or voice strings.
+  const AGENT_TEMPLATES = plans.map((plan) => ({
     id: plan.slug,
     name: plan.name,
-    description: plan.description ?? "Plan-driven agent template",
-    model: index === 0 ? "concise" : index === plans.length - 1 ? "detailed" : "balanced",
-    voice: index === 0 ? "Voice A — Professional Male" : index === 1 ? "Voice B — Warm Female" : "Voice C — Neutral Female",
-    channel: "Voice + WhatsApp",
-    voiceCost: 0.18 + index * 0.04,
-    aiCost: 4.2 + index * 0.8,
-    callCost: 0.022,
+    description: plan.description ?? "",
+    model: plan.templateModel ?? "balanced",
+    voice: plan.templateVoice ?? "—",
+    channel: plan.templateChannel ?? "—",
+    voiceCost: plan.voiceCostPerMinute ?? 0,
+    aiCost: plan.aiCostPerMessage ?? 0,
+    callCost: plan.callCostPerMinute ?? 0,
     active: plan.isPublic,
   }));
 
-  const EARNINGS_MONTHLY = REVENUE_TREND.map((row, index) => ({
-    month: row.month,
-    clients: workspaces.length,
-    newClients: index === REVENUE_TREND.length - 1 ? 2 : 1,
-    churned: 0,
-    invoiced: row.mrr,
-    collected: row.collected,
-    outstanding: Math.max(0, row.mrr - row.collected),
-    netMrr: row.mrr,
-  }));
+  // Earnings monthly: real invoiced/collected per month, real client counts
+  // by creation date and status.
+  const EARNINGS_MONTHLY = monthLabels.map((label, index) => {
+    const monthDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - (11 - index), 1));
+    const nextDate = new Date(Date.UTC(monthDate.getUTCFullYear(), monthDate.getUTCMonth() + 1, 1));
+    const matching = allInvoices.filter(
+      (invoice) => invoice.issuedAt >= monthDate && invoice.issuedAt < nextDate,
+    );
+    const invoiced = matching.reduce((total, invoice) => total + invoice.amountCents, 0);
+    const collected = matching
+      .filter((invoice) => invoice.status === "paid")
+      .reduce((total, invoice) => total + invoice.amountCents, 0);
+    const newClients = workspaces.filter(
+      (ws) => ws.createdAt >= monthDate && ws.createdAt < nextDate,
+    ).length;
+    const churned = workspaces.filter(
+      (ws) =>
+        ws.status === "archived" &&
+        ws.updatedAt >= monthDate &&
+        ws.updatedAt < nextDate,
+    ).length;
+    const totalClients = workspaces.filter((ws) => ws.createdAt < nextDate).length;
+    const netMrrCents = workspaces.reduce(
+      (total, ws) =>
+        total + ((ws.createdAt < nextDate && ws.status !== "archived" ? ws.plan?.monthlyFeeCents : 0) ?? 0),
+      0,
+    );
+    return {
+      month: label,
+      clients: totalClients,
+      newClients,
+      churned,
+      invoiced: centsToNumber(invoiced),
+      collected: centsToNumber(collected),
+      outstanding: centsToNumber(Math.max(0, invoiced - collected)),
+      netMrr: centsToNumber(netMrrCents),
+    };
+  });
 
   const REVENUE_BY_PLAN = plans.map((plan) => {
-    const planClients = workspaces.filter((ws) => ws.planId === plan.id).length;
+    const planClients = workspaces.filter((ws) => ws.planId === plan.id && ws.status !== "archived").length;
     return { plan: plan.name, revenue: centsToNumber(plan.monthlyFeeCents * planClients) };
   });
 
-  const MRR_MOVEMENT = [
-    { kind: "New", value: 4800, color: "#10b981" },
-    { kind: "Expansion", value: 2200, color: "#34d399" },
-    { kind: "Contraction", value: -680, color: "#f59e0b" },
-    { kind: "Churned", value: -1200, color: "#f43f5e" },
-  ];
+  // MRR movement: read from the MrrMovement table for the current month.
+  // If no rows exist, derive from invoices/workspaces this month.
+  const monthMovementRows = mrrMovements.filter(
+    (row) => row.periodStart >= monthStart,
+  );
+  const MRR_MOVEMENT: Array<{ kind: string; value: number; color: string }> =
+    monthMovementRows.length > 0
+      ? monthMovementRows.map((row) => ({
+          kind: row.kind.charAt(0).toUpperCase() + row.kind.slice(1),
+          value: centsToNumber(row.amountCents),
+          color:
+            row.kind.toLowerCase() === "new"
+              ? "#10b981"
+              : row.kind.toLowerCase() === "expansion"
+                ? "#34d399"
+                : row.kind.toLowerCase() === "contraction"
+                  ? "#f59e0b"
+                  : "#f43f5e",
+        }))
+      : (() => {
+          const monthEnd = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+          const newCents = workspaces
+            .filter((ws) => ws.createdAt >= monthStart && ws.createdAt < monthEnd)
+            .reduce((total, ws) => total + (ws.plan?.monthlyFeeCents ?? 0), 0);
+          const churnedCents = workspaces
+            .filter(
+              (ws) =>
+                ws.status === "archived" && ws.updatedAt >= monthStart && ws.updatedAt < monthEnd,
+            )
+            .reduce((total, ws) => total + (ws.plan?.monthlyFeeCents ?? 0), 0);
+          return [
+            { kind: "New", value: centsToNumber(newCents), color: "#10b981" },
+            { kind: "Expansion", value: 0, color: "#34d399" },
+            { kind: "Contraction", value: 0, color: "#f59e0b" },
+            { kind: "Churned", value: -centsToNumber(churnedCents), color: "#f43f5e" },
+          ];
+        })();
 
   const CLIENT_INVOICES = invoices.slice(0, 8).map((invoice) => ({
     id: invoice.id,

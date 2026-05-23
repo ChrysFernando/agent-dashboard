@@ -105,6 +105,30 @@ enum SupportTicketPriority {
   urgent
 }
 
+enum SessionSubject {
+  admin
+  team
+}
+
+enum ServiceHealthStatus {
+  operational
+  degraded
+  outage
+  maintenance
+}
+
+enum IncidentSeverity {
+  minor
+  major
+  critical
+}
+
+enum IncidentStatus {
+  ongoing
+  monitoring
+  resolved
+}
+
 model Plan {
   id                    String      @id @default(cuid())
   slug                  String      @unique
@@ -118,6 +142,13 @@ model Plan {
   maxKnowledgeDocuments Int?
   isPublic              Boolean     @default(true)
   isDefault             Boolean     @default(false)
+  // Template metadata used by Sentinel "Agent Templates" panel.
+  templateModel         String?
+  templateVoice         String?
+  templateChannel       String?
+  voiceCostPerMinute    Float?
+  aiCostPerMessage      Float?
+  callCostPerMinute     Float?
   createdAt             DateTime    @default(now())
   updatedAt             DateTime    @updatedAt
   workspaces            Workspace[]
@@ -131,6 +162,7 @@ model Workspace {
   contactEmail     String?
   contactPhone     String?
   timezone         String
+  country          String?
   defaultLanguage  String
   retentionDays    Int?
   status           WorkspaceStatus       @default(active)
@@ -169,16 +201,18 @@ model NotificationRule {
 }
 
 model TeamMember {
-  id          String   @id @default(cuid())
-  workspaceId String
-  name        String
-  email       String   @unique
-  role        TeamRole
-  initials    String
-  color       String
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
-  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  id           String    @id @default(cuid())
+  workspaceId  String
+  name         String
+  email        String    @unique
+  role         TeamRole
+  initials     String
+  color        String
+  passwordHash String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model Agent {
@@ -461,17 +495,19 @@ model DashboardSnapshot {
 }
 
 model AdminUser {
-  id          String          @id @default(cuid())
-  email       String          @unique
-  name        String
-  role        AdminRole       @default(support)
-  initials    String
-  color       String          @default("#7b61ff")
-  isActive    Boolean         @default(true)
-  lastLoginAt DateTime?
-  createdAt   DateTime        @default(now())
-  updatedAt   DateTime        @updatedAt
-  auditEntries AdminAuditLog[]
+  id                String          @id @default(cuid())
+  email             String          @unique
+  name              String
+  role              AdminRole       @default(support)
+  initials          String
+  color             String          @default("#7b61ff")
+  isActive          Boolean         @default(true)
+  passwordHash      String?
+  passwordChangedAt DateTime?
+  lastLoginAt       DateTime?
+  createdAt         DateTime        @default(now())
+  updatedAt         DateTime        @updatedAt
+  auditEntries      AdminAuditLog[]
 }
 
 model AdminAuditLog {
@@ -554,4 +590,62 @@ model SupportTicketMessage {
   body       String
   createdAt  DateTime      @default(now())
   ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+}
+
+model Session {
+  id          String          @id
+  subjectType SessionSubject
+  subjectId   String
+  workspaceId String?
+  expiresAt   DateTime
+  createdAt   DateTime        @default(now())
+  lastSeenAt  DateTime        @default(now())
+  userAgent   String?
+  ipAddress   String?
+
+  @@index([subjectType, subjectId])
+  @@index([expiresAt])
+}
+
+model ServiceStatus {
+  id             String              @id @default(cuid())
+  name           String              @unique
+  status         ServiceHealthStatus @default(operational)
+  uptimePercent  Float               @default(100)
+  latencyMs      Int                 @default(0)
+  lastIncidentAt DateTime?
+  sortOrder      Int                 @default(0)
+  createdAt      DateTime            @default(now())
+  updatedAt      DateTime            @updatedAt
+  incidents      Incident[]
+}
+
+model Incident {
+  id              String           @id @default(cuid())
+  serviceId       String?
+  occurredAt      DateTime
+  severity        IncidentSeverity @default(minor)
+  durationMinutes Int?
+  status          IncidentStatus   @default(ongoing)
+  description     String
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  service         ServiceStatus?   @relation(fields: [serviceId], references: [id], onDelete: SetNull)
+
+  @@index([occurredAt])
+}
+
+// Records MRR movement per month (new business, expansion, contraction, churn).
+// Computed by jobs / admin actions; the Sentinel "MRR Movement" panel reads
+// this table directly. No fallback synthesized values.
+model MrrMovement {
+  id          String   @id @default(cuid())
+  periodStart DateTime
+  kind        String
+  amountCents Int
+  notes       String?
+  createdAt   DateTime @default(now())
+
+  @@unique([periodStart, kind])
+  @@index([periodStart])
 }

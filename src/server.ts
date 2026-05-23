@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
+import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import fastifyStatic from "@fastify/static";
 import swagger from "@fastify/swagger";
@@ -14,12 +15,23 @@ import type {
   SupportTicketStatus,
   WorkspaceStatus,
 } from "@prisma/client";
+import { SessionSubject } from "@prisma/client";
 import { Type, type Static } from "@sinclair/typebox";
 import { TypeBoxTypeProvider } from "@fastify/type-provider-typebox";
 import Fastify from "fastify";
 
 import { env } from "./lib/env.js";
 import { prisma } from "./lib/prisma.js";
+import {
+  ADMIN_COOKIE,
+  PORTAL_COOKIE,
+  cookieOptions,
+  createSession,
+  loadAdminFromSession,
+  loadTeamMemberFromSession,
+  revokeSession,
+  verifyPassword,
+} from "./lib/auth.js";
 import { createPrefixedId, DEFAULT_WORKSPACE_ID } from "./lib/utils.js";
 import {
   getAgents,
@@ -155,6 +167,11 @@ const app = Fastify({
 
 await app.register(cors, {
   origin: true,
+  credentials: true,
+});
+
+await app.register(cookie, {
+  hook: "onRequest",
 });
 
 await app.register(swagger, {
@@ -233,6 +250,272 @@ await app.register(fastifyStatic, {
   index: ["index.html"],
   redirect: true,
 });
+
+// ------------------------------------------------------------------
+// Authentication
+// ------------------------------------------------------------------
+
+// Public routes never gated by the auth preHandler — login endpoints,
+// the inbound webhook, health, landing, login HTML, and OpenAPI docs.
+const PUBLIC_PREFIXES = [
+  "/api/auth/",
+  "/api/webhooks/agent-events",
+  "/health",
+  "/docs",
+  "/favicon",
+];
+const PUBLIC_EXACT = new Set([
+  "/",
+  "/admin/login",
+  "/portal/login",
+  "/admin/login/",
+  "/portal/login/",
+  "/portal-classic",
+  "/admin-classic",
+  "/preview/portal",
+  "/preview/admin",
+  "/dashboard",
+  "/portal",
+  "/admin",
+]);
+
+function isHtmlRequest(accept: string | undefined): boolean {
+  return typeof accept === "string" && accept.includes("text/html");
+}
+
+// Auth gate. Runs for every request. Decorates request with adminContext /
+// portalContext when a valid session is present, and rejects unauthenticated
+// requests to protected URLs. HTML requests under /admin/ or /portal/ are
+// redirected to the login page; API requests get a JSON 401.
+app.addHook("preHandler", async (request, reply) => {
+  const url = request.url.split("?")[0];
+
+  if (PUBLIC_PREFIXES.some((p) => url.startsWith(p)) || PUBLIC_EXACT.has(url)) {
+    return;
+  }
+
+  const adminCookie = request.cookies?.[ADMIN_COOKIE];
+  const portalCookie = request.cookies?.[PORTAL_COOKIE];
+
+  const admin = await loadAdminFromSession(adminCookie);
+  if (admin) {
+    request.adminContext = {
+      adminId: admin.admin.id,
+      role: admin.admin.role,
+    };
+  }
+
+  const portal = await loadTeamMemberFromSession(portalCookie);
+  if (portal) {
+    request.portalContext = {
+      teamMemberId: portal.member.id,
+      workspaceId: portal.member.workspaceId,
+      role: portal.member.role,
+    };
+  }
+
+  const wantsHtml = isHtmlRequest(request.headers.accept as string | undefined);
+
+  // /admin/* (static bundle pages) → require admin session, redirect to login
+  if (url.startsWith("/admin/") && !admin) {
+    if (wantsHtml) {
+      reply.redirect(`/admin/login?next=${encodeURIComponent(request.url)}`, 302);
+      return reply;
+    }
+    reply.code(401).send({ message: "Admin authentication required" });
+    return reply;
+  }
+
+  // /portal/* (static bundle pages) → require portal session OR admin
+  if (url.startsWith("/portal/") && !portal && !admin) {
+    if (wantsHtml) {
+      reply.redirect(`/portal/login?next=${encodeURIComponent(request.url)}`, 302);
+      return reply;
+    }
+    reply.code(401).send({ message: "Portal authentication required" });
+    return reply;
+  }
+
+  // /api/admin/* → require admin session
+  if (url.startsWith("/api/admin/") && !admin) {
+    reply.code(401).send({ message: "Admin authentication required" });
+    return reply;
+  }
+
+  // /api/portal/* → require portal session OR admin
+  if (url.startsWith("/api/portal/") && !portal && !admin) {
+    reply.code(401).send({ message: "Portal authentication required" });
+    return reply;
+  }
+
+  // All other /api/* (legacy workspace-scoped routes) → require portal or admin
+  if (url.startsWith("/api/") && !portal && !admin) {
+    reply.code(401).send({ message: "Authentication required" });
+    return reply;
+  }
+});
+
+// Login pages (HTML). These are explicit routes registered BEFORE
+// @fastify/static would otherwise return 404 under /admin/ and /portal/.
+const adminLoginHtmlPath = resolve(ROOT, "src/ui/admin-login.html");
+const portalLoginHtmlPath = resolve(ROOT, "src/ui/portal-login.html");
+
+app.get("/admin/login", { schema: { tags: ["System"], summary: "Admin sign-in page" } }, async (_req, reply) => {
+  reply.type("text/html; charset=utf-8");
+  return serveFile(adminLoginHtmlPath);
+});
+
+app.get("/portal/login", { schema: { tags: ["System"], summary: "Portal sign-in page" } }, async (_req, reply) => {
+  reply.type("text/html; charset=utf-8");
+  return serveFile(portalLoginHtmlPath);
+});
+
+// Admin auth API
+const loginBody = Type.Object({
+  email: Type.String({ format: "email", minLength: 1 }),
+  password: Type.String({ minLength: 1 }),
+});
+
+app.post(
+  "/api/auth/admin/login",
+  { schema: { tags: ["System"], summary: "Sign in as a Sentinel admin", body: loginBody } },
+  async (request, reply) => {
+    const { email, password } = request.body as Static<typeof loginBody>;
+    const admin = await prisma.adminUser.findUnique({ where: { email: email.toLowerCase() } });
+    if (!admin || !admin.isActive) {
+      reply.code(401);
+      return { message: "Invalid email or password" };
+    }
+    const ok = await verifyPassword(password, admin.passwordHash);
+    if (!ok) {
+      reply.code(401);
+      return { message: "Invalid email or password" };
+    }
+    const sessionId = await createSession({
+      subjectType: SessionSubject.admin,
+      subjectId: admin.id,
+      userAgent: (request.headers["user-agent"] as string | undefined) ?? null,
+      ipAddress: request.ip ?? null,
+    });
+    await prisma.adminUser.update({ where: { id: admin.id }, data: { lastLoginAt: new Date() } });
+    reply.setCookie(ADMIN_COOKIE, sessionId, cookieOptions());
+    return {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role,
+    };
+  },
+);
+
+app.post(
+  "/api/auth/admin/logout",
+  { schema: { tags: ["System"], summary: "Sign out of Sentinel admin" } },
+  async (request, reply) => {
+    await revokeSession(request.cookies?.[ADMIN_COOKIE]);
+    reply.clearCookie(ADMIN_COOKIE, { path: "/" });
+    return { ok: true };
+  },
+);
+
+app.get(
+  "/api/auth/admin/me",
+  { schema: { tags: ["System"], summary: "Currently signed-in admin" } },
+  async (request, reply) => {
+    const ctx = request.adminContext;
+    if (!ctx?.adminId) {
+      reply.code(401);
+      return { message: "Not signed in" };
+    }
+    const admin = await prisma.adminUser.findUnique({ where: { id: ctx.adminId } });
+    if (!admin) {
+      reply.code(401);
+      return { message: "Not signed in" };
+    }
+    return {
+      id: admin.id,
+      email: admin.email,
+      name: admin.name,
+      role: admin.role,
+      initials: admin.initials,
+      color: admin.color,
+    };
+  },
+);
+
+// Portal auth API
+app.post(
+  "/api/auth/portal/login",
+  { schema: { tags: ["System"], summary: "Sign in to the client portal", body: loginBody } },
+  async (request, reply) => {
+    const { email, password } = request.body as Static<typeof loginBody>;
+    const member = await prisma.teamMember.findUnique({ where: { email: email.toLowerCase() } });
+    if (!member) {
+      reply.code(401);
+      return { message: "Invalid email or password" };
+    }
+    const ok = await verifyPassword(password, member.passwordHash);
+    if (!ok) {
+      reply.code(401);
+      return { message: "Invalid email or password" };
+    }
+    const sessionId = await createSession({
+      subjectType: SessionSubject.team,
+      subjectId: member.id,
+      workspaceId: member.workspaceId,
+      userAgent: (request.headers["user-agent"] as string | undefined) ?? null,
+      ipAddress: request.ip ?? null,
+    });
+    await prisma.teamMember.update({ where: { id: member.id }, data: { lastLoginAt: new Date() } });
+    reply.setCookie(PORTAL_COOKIE, sessionId, cookieOptions());
+    return {
+      id: member.id,
+      email: member.email,
+      name: member.name,
+      role: member.role,
+      workspaceId: member.workspaceId,
+    };
+  },
+);
+
+app.post(
+  "/api/auth/portal/logout",
+  { schema: { tags: ["System"], summary: "Sign out of the client portal" } },
+  async (request, reply) => {
+    await revokeSession(request.cookies?.[PORTAL_COOKIE]);
+    reply.clearCookie(PORTAL_COOKIE, { path: "/" });
+    return { ok: true };
+  },
+);
+
+app.get(
+  "/api/auth/portal/me",
+  { schema: { tags: ["System"], summary: "Currently signed-in portal user" } },
+  async (request, reply) => {
+    const ctx = request.portalContext;
+    if (!ctx?.teamMemberId) {
+      reply.code(401);
+      return { message: "Not signed in" };
+    }
+    const member = await prisma.teamMember.findUnique({
+      where: { id: ctx.teamMemberId },
+      include: { workspace: { select: { id: true, name: true } } },
+    });
+    if (!member) {
+      reply.code(401);
+      return { message: "Not signed in" };
+    }
+    return {
+      id: member.id,
+      email: member.email,
+      name: member.name,
+      role: member.role,
+      initials: member.initials,
+      color: member.color,
+      workspace: member.workspace,
+    };
+  },
+);
 
 app.get(
   "/health",
@@ -878,9 +1161,8 @@ app.post(
 // Super Admin endpoints (cross-tenant)
 // ------------------------------------------------------------------
 
-function adminId(request: { headers: Record<string, unknown> }): string | undefined {
-  const value = request.headers["x-admin-id"];
-  return typeof value === "string" ? value : undefined;
+function adminId(request: { adminContext?: { adminId: string } }): string | undefined {
+  return request.adminContext?.adminId;
 }
 
 app.get(
@@ -1338,14 +1620,15 @@ app.post(
 // Client Portal endpoints
 // ------------------------------------------------------------------
 
-function workspaceIdFromRequest(request: { headers: Record<string, unknown>; query: { workspaceId?: string } | unknown }): string {
-  const headerValue = request.headers["x-workspace-id"];
-  if (typeof headerValue === "string" && headerValue.length > 0) {
-    return headerValue;
+function workspaceIdFromRequest(request: {
+  portalContext?: { workspaceId: string };
+  adminContext?: { impersonateWorkspaceId?: string };
+}): string {
+  if (request.portalContext?.workspaceId) {
+    return request.portalContext.workspaceId;
   }
-  const query = (request as { query?: { workspaceId?: string } }).query;
-  if (query?.workspaceId) {
-    return query.workspaceId;
+  if (request.adminContext?.impersonateWorkspaceId) {
+    return request.adminContext.impersonateWorkspaceId;
   }
   return DEFAULT_WORKSPACE_ID;
 }
