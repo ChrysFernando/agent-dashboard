@@ -253,9 +253,22 @@ app.get(
   },
 );
 
-// /portal and /admin are served by @fastify/static above (the original
-// Aether & Sentinel bundles). The vanilla-HTML alternates are exposed at
-// /portal-classic and /admin-classic in case you want the lighter UI.
+// /portal/ and /admin/ are served by @fastify/static above (the original
+// Aether & Sentinel bundles). Without a trailing slash the static prefix
+// doesn't match, so redirect explicitly so bare /portal and /admin work.
+app.get(
+  "/portal",
+  { schema: { tags: ["System"], summary: "Redirect to /portal/" } },
+  async (_request, reply) => reply.redirect("/portal/", 308),
+);
+app.get(
+  "/admin",
+  { schema: { tags: ["System"], summary: "Redirect to /admin/" } },
+  async (_request, reply) => reply.redirect("/admin/", 308),
+);
+
+// The vanilla-HTML alternates are exposed at /portal-classic and
+// /admin-classic in case you want the lighter UI.
 app.get(
   "/portal-classic",
   { schema: { tags: ["System"], summary: "Vanilla-HTML client portal (alternate)" } },

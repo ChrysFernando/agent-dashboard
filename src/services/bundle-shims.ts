@@ -6,6 +6,8 @@
  * outputs the user designed; their mock-data layer expects a specific schema.
  * Rather than rewrite all the React pages, we satisfy that schema from the DB.
  */
+import { createHash } from "node:crypto";
+
 import { Prisma, WorkspaceStatus } from "@prisma/client";
 
 import { env } from "../lib/env.js";
@@ -334,8 +336,11 @@ const SENTINEL_STATUS_MAP: Record<WorkspaceStatus, string> = {
 };
 
 function sentinelClientCode(workspaceId: string): string {
-  const hex = workspaceId.replace(/[^a-fA-F0-9]/g, "").toUpperCase().slice(0, 6) || "AAAAAA";
-  return `C-${hex.padEnd(6, "0")}`;
+  // Deterministic 6-char ID from the workspace id. Hashing avoids collisions
+  // that happened with strip-non-hex (e.g. ws_helio and ws_zephyr both reduced
+  // to "E" → padded to E00000, producing duplicate React keys).
+  const hex = createHash("sha1").update(workspaceId).digest("hex").toUpperCase().slice(0, 6);
+  return `C-${hex}`;
 }
 
 function countryFromTimezone(timezone: string): string {
@@ -460,19 +465,30 @@ export async function getSentinelBundle() {
   ];
   CLIENT_BREAKDOWN[2].count = invoices.filter((invoice) => invoice.status === "overdue").length;
 
+  // The dashboard page's ACTIVITY_META map only knows 7 action keys
+  // (payment_received, signup, payment_failed, agent_created, ticket_opened,
+  // account_blocked, plan_upgrade). Map our richer set into those buckets,
+  // otherwise <ActivityRow> crashes on `meta.cls` when meta is undefined.
+  const mapToActivityKey = (action: string): "payment_received" | "signup" | "payment_failed" | "agent_created" | "ticket_opened" | "account_blocked" | "plan_upgrade" => {
+    const a = action.toLowerCase();
+    if (a.includes("client.created") || a.includes("signup")) return "signup";
+    if (a.includes("suspended") || a.includes("blocked") || a.includes("deleted") || a.includes("deactivated") || a.includes("retracted")) return "account_blocked";
+    if (a.includes("payment.failed") || a.includes("failed")) return "payment_failed";
+    if (a.includes("payment") || a.includes("invoice")) return "payment_received";
+    if (a.includes("agent")) return "agent_created";
+    if (a.includes("ticket")) return "ticket_opened";
+    if (a.includes("plan")) return "plan_upgrade";
+    // Default: treat as a neutral "agent created" so the row renders.
+    return "agent_created";
+  };
+
   const ACTIVITY_FEED = audit.slice(0, 14).map((entry) => {
     const targetWorkspace = workspaces.find((ws) => ws.id === entry.targetId);
     const ts = entry.occurredAt.toISOString().slice(11, 19);
-    const kind = entry.action.includes("payment_received") || entry.action.includes("signup") || entry.action.includes("created")
-      ? "good"
-      : entry.action.includes("blocked") || entry.action.includes("failed")
-        ? "bad"
-        : "neutral";
     return {
       ts,
-      action: entry.action.replace(/\./g, "_"),
+      action: mapToActivityKey(entry.action),
       client: targetWorkspace?.name ?? entry.targetId ?? "—",
-      kind,
       detail: entry.summary,
     };
   });
