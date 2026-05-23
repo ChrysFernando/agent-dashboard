@@ -203,11 +203,36 @@ async function serveFile(path: string) {
 
 const ROOT = process.cwd();
 
+// Unpacked Aether & Sentinel artifact bundles. These preserve the original
+// designed look and feel; their mock-data layer is patched to fetch live data
+// from /api/portal/aether-bundle and /api/admin/sentinel-bundle respectively.
+const portalBundleDir = resolve(ROOT, "ui-bundles/portal");
+const adminBundleDir = resolve(ROOT, "ui-bundles/admin");
+// Lightweight alternates (vanilla HTML/JS dashboards) — also wired to the API.
 const clientPortalHtmlPath = resolve(ROOT, "src/ui/client-portal.html");
 const superAdminHtmlPath = resolve(ROOT, "src/ui/super-admin.html");
 const landingHtmlPath = resolve(ROOT, "src/ui/landing.html");
 const previewPortalHtmlPath = env.dashboardHtmlPath;
 const previewAdminHtmlPath = resolve(ROOT, "Sentinel Super Admin Console.html");
+
+// Serve each unpacked bundle as a static directory. The bundle's index.html
+// references siblings by relative name (asset_xxx.js, asset_xxx.bin), so we
+// mount the directory under /portal/ and /admin/ — that way `/portal/` returns
+// index.html and `/portal/asset_xxx.js` resolves correctly relative to it.
+await app.register(fastifyStatic, {
+  root: portalBundleDir,
+  prefix: "/portal/",
+  decorateReply: false,
+  index: ["index.html"],
+  redirect: true,
+});
+await app.register(fastifyStatic, {
+  root: adminBundleDir,
+  prefix: "/admin/",
+  decorateReply: false,
+  index: ["index.html"],
+  redirect: true,
+});
 
 app.get(
   "/health",
@@ -228,11 +253,12 @@ app.get(
   },
 );
 
+// /portal and /admin are served by @fastify/static above (the original
+// Aether & Sentinel bundles). The vanilla-HTML alternates are exposed at
+// /portal-classic and /admin-classic in case you want the lighter UI.
 app.get(
-  "/portal",
-  {
-    schema: { tags: ["System"], summary: "Client portal UI" },
-  },
+  "/portal-classic",
+  { schema: { tags: ["System"], summary: "Vanilla-HTML client portal (alternate)" } },
   async (_request, reply) => {
     reply.type("text/html; charset=utf-8");
     return serveFile(clientPortalHtmlPath);
@@ -240,10 +266,8 @@ app.get(
 );
 
 app.get(
-  "/admin",
-  {
-    schema: { tags: ["System"], summary: "Super admin console UI" },
-  },
+  "/admin-classic",
+  { schema: { tags: ["System"], summary: "Vanilla-HTML super admin (alternate)" } },
   async (_request, reply) => {
     reply.type("text/html; charset=utf-8");
     return serveFile(superAdminHtmlPath);
@@ -853,6 +877,18 @@ app.get(
 );
 
 app.get(
+  "/api/admin/sentinel-bundle",
+  {
+    schema: {
+      tags: ["Admin / Metrics"],
+      summary:
+        "Live-data bundle in the exact shape the Sentinel admin UI expects. Consumed synchronously by the unpacked bundle's mock-data shim.",
+    },
+  },
+  async () => getSentinelBundle(),
+);
+
+app.get(
   "/api/admin/clients",
   {
     schema: {
@@ -1305,6 +1341,19 @@ app.get(
   "/api/portal/workspaces",
   { schema: { tags: ["Portal / Account"], summary: "List workspaces available for portal switcher" } },
   async () => listWorkspaces(),
+);
+
+app.get(
+  "/api/portal/aether-bundle",
+  {
+    schema: {
+      tags: ["Portal / Account"],
+      summary:
+        "Live-data bundle in the exact shape the Aether client portal UI expects. Consumed synchronously by the unpacked bundle's mock-data shim.",
+      querystring: Type.Object({ workspaceId: Type.Optional(Type.String()) }),
+    },
+  },
+  async (request) => getAetherBundle(workspaceIdFromRequest(request)),
 );
 
 app.get(
