@@ -1,0 +1,367 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum AgentType {
+  sales
+  support
+  booking
+  coldcall
+}
+
+enum AgentStatus {
+  live
+  paused
+  idle
+}
+
+enum Channel {
+  voice
+  whatsapp
+}
+
+enum KnowledgeBaseType {
+  faq
+  script
+  product_info
+  objection_handling
+  pricing
+}
+
+enum TranscriptSentiment {
+  pos
+  neu
+  neg
+}
+
+enum TranscriptSpeaker {
+  agent
+  user
+  system
+}
+
+enum NotificationEventType {
+  call_completed
+  agent_error
+  spend_threshold
+}
+
+enum TeamRole {
+  owner
+  admin
+  viewer
+}
+
+enum WebhookDeliveryStatus {
+  pending
+  success
+  failed
+}
+
+model Workspace {
+  id               String                @id @default(cuid())
+  name             String
+  timezone         String
+  defaultLanguage  String
+  retentionDays    Int?
+  createdAt        DateTime              @default(now())
+  updatedAt        DateTime              @updatedAt
+  notifications    NotificationRule[]
+  teamMembers      TeamMember[]
+  billingSnapshots BillingUsageSnapshot[]
+  invoices         Invoice[]
+}
+
+model NotificationRule {
+  id             String                @id @default(cuid())
+  workspaceId    String
+  eventType      NotificationEventType
+  emailEnabled   Boolean               @default(false)
+  webhookEnabled Boolean               @default(false)
+  workspace      Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, eventType])
+}
+
+model TeamMember {
+  id          String   @id @default(cuid())
+  workspaceId String
+  name        String
+  email       String   @unique
+  role        TeamRole
+  initials    String
+  color       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+}
+
+model Agent {
+  id                 String                @id @default(cuid())
+  externalId         String?               @unique
+  name               String                @unique
+  type               AgentType
+  avatarShape        String?
+  status             AgentStatus           @default(idle)
+  personality        String?
+  language           String?
+  greeting           String?
+  rating             Float?
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+  channels           AgentChannel[]
+  knowledgeBaseLinks AgentKnowledgeBase[]
+  calls              Call[]
+  messageEvents      MessageEvent[]
+  transcripts        Transcript[]
+  events             AgentEvent[]
+}
+
+model AgentChannel {
+  id      String  @id @default(cuid())
+  agentId String
+  channel Channel
+  agent   Agent   @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, channel])
+}
+
+model KnowledgeBaseDocument {
+  id            String               @id @default(cuid())
+  externalId    String?              @unique
+  title         String
+  type          KnowledgeBaseType
+  content       String
+  createdAt     DateTime             @default(now())
+  updatedAt     DateTime             @updatedAt
+  lastWebhookAt DateTime?
+  tags          KnowledgeBaseTag[]
+  agentLinks    AgentKnowledgeBase[]
+  events        AgentEvent[]
+}
+
+model KnowledgeBaseTag {
+  id              String                @id @default(cuid())
+  knowledgeBaseId String
+  value           String
+  knowledgeBase   KnowledgeBaseDocument @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+
+  @@unique([knowledgeBaseId, value])
+}
+
+model AgentKnowledgeBase {
+  id              String                @id @default(cuid())
+  agentId         String
+  knowledgeBaseId String
+  createdAt       DateTime              @default(now())
+  agent           Agent                 @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  knowledgeBase   KnowledgeBaseDocument @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+
+  @@unique([agentId, knowledgeBaseId])
+}
+
+model Call {
+  id               String      @id @default(cuid())
+  externalId       String?     @unique
+  agentId          String
+  contact          String
+  direction        String?
+  status           String
+  outcome          String?
+  startedAt        DateTime
+  endedAt          DateTime?
+  durationSec      Int         @default(0)
+  responseTimeMs   Int?
+  sentimentScore   Float?
+  resolution       String?
+  followUpRequired Boolean     @default(false)
+  metadataJson     String?
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  agent            Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  transcript       Transcript? @relation("CallTranscript")
+  events           AgentEvent[]
+
+  @@index([agentId, startedAt])
+}
+
+model MessageEvent {
+  id           String      @id @default(cuid())
+  externalId   String?     @unique
+  agentId      String
+  transcriptId String?
+  direction    String
+  status       String
+  contact      String
+  body         String
+  occurredAt   DateTime
+  threadId     String?
+  metadataJson String?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  agent        Agent       @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  transcript   Transcript? @relation(fields: [transcriptId], references: [id], onDelete: SetNull)
+  events       AgentEvent[]
+
+  @@index([agentId, occurredAt])
+}
+
+model Transcript {
+  id               String              @id @default(cuid())
+  externalId       String?             @unique
+  agentId          String
+  channel          Channel
+  contact          String
+  callId           String?             @unique
+  startedAt        DateTime
+  endedAt          DateTime?
+  durationSec      Int                 @default(0)
+  outcome          String?
+  sentiment        TranscriptSentiment @default(neu)
+  responseTimeMs   Int?
+  sentimentScore   Float?
+  resolution       String?
+  followUpRequired Boolean             @default(false)
+  summary          String?
+  rawPayloadJson   String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  agent            Agent               @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  call             Call?               @relation("CallTranscript", fields: [callId], references: [id], onDelete: SetNull)
+  entries          TranscriptEntry[]
+  chapters         TranscriptChapter[]
+  messageEvents    MessageEvent[]
+  events           AgentEvent[]
+
+  @@index([agentId, startedAt])
+}
+
+model TranscriptChapter {
+  id           String     @id @default(cuid())
+  transcriptId String
+  label        String
+  sortOrder    Int
+  transcript   Transcript @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@unique([transcriptId, sortOrder])
+}
+
+model TranscriptEntry {
+  id                String           @id @default(cuid())
+  transcriptId      String
+  speaker           TranscriptSpeaker
+  timestampOffsetSec Int
+  text              String
+  sortOrder         Int
+  transcript        Transcript       @relation(fields: [transcriptId], references: [id], onDelete: Cascade)
+
+  @@unique([transcriptId, sortOrder])
+}
+
+model AgentEvent {
+  id              String                 @id @default(cuid())
+  eventType       String
+  summary         String
+  severity        String                 @default("info")
+  agentId         String?
+  callId          String?
+  messageEventId  String?
+  transcriptId    String?
+  knowledgeBaseId String?
+  payloadJson     String?
+  occurredAt      DateTime
+  processedAt     DateTime               @default(now())
+  agent           Agent?                 @relation(fields: [agentId], references: [id], onDelete: SetNull)
+  call            Call?                  @relation(fields: [callId], references: [id], onDelete: SetNull)
+  messageEvent    MessageEvent?          @relation(fields: [messageEventId], references: [id], onDelete: SetNull)
+  transcript      Transcript?            @relation(fields: [transcriptId], references: [id], onDelete: SetNull)
+  knowledgeBase   KnowledgeBaseDocument? @relation(fields: [knowledgeBaseId], references: [id], onDelete: SetNull)
+  deliveries      WebhookDelivery[]
+
+  @@index([occurredAt])
+}
+
+model BillingUsageSnapshot {
+  id                   String    @id @default(cuid())
+  workspaceId          String
+  periodStart          DateTime
+  periodEnd            DateTime
+  label                String
+  voiceMinutes         Int       @default(0)
+  aiMinutes            Int       @default(0)
+  callMinutes          Int       @default(0)
+  messageCount         Int       @default(0)
+  transcriptMinutes    Int       @default(0)
+  knowledgeDocumentCount Int     @default(0)
+  knowledgeUpdateCount Int       @default(0)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+  workspace            Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoices             Invoice[]
+
+  @@unique([workspaceId, periodStart])
+}
+
+model Invoice {
+  id              String               @id
+  workspaceId     String
+  usageSnapshotId String?
+  issuedAt        DateTime
+  dueAt           DateTime
+  amountCents     Int
+  status          String
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  usageSnapshot   BillingUsageSnapshot? @relation(fields: [usageSnapshotId], references: [id], onDelete: SetNull)
+}
+
+model WebhookEndpoint {
+  id             String               @id @default(cuid())
+  url            String
+  secret         String?
+  status         String               @default("active")
+  description    String?
+  lastTestedAt   DateTime?
+  lastDeliveryAt DateTime?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+  events         WebhookEndpointEvent[]
+  deliveries     WebhookDelivery[]
+}
+
+model WebhookEndpointEvent {
+  id         String          @id @default(cuid())
+  endpointId String
+  eventType  String
+  endpoint   WebhookEndpoint @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+
+  @@unique([endpointId, eventType])
+}
+
+model WebhookDelivery {
+  id             String                @id @default(cuid())
+  endpointId     String
+  agentEventId   String
+  eventType      String
+  payloadJson    String
+  status         WebhookDeliveryStatus @default(pending)
+  responseStatus Int?
+  responseBody   String?
+  attemptedAt    DateTime              @default(now())
+  durationMs     Int?
+  endpoint       WebhookEndpoint       @relation(fields: [endpointId], references: [id], onDelete: Cascade)
+  agentEvent     AgentEvent            @relation(fields: [agentEventId], references: [id], onDelete: Cascade)
+}
+
+model DashboardSnapshot {
+  key        String   @id
+  payloadJson String
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
