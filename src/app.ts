@@ -376,7 +376,7 @@ app.get("/portal/login", { schema: { tags: ["System"], summary: "Portal sign-in 
 // Unset the env var (or change its value) in Vercel after running this once
 // to disable the endpoint. Reading the SQL from prisma/init.sql; the file
 // is bundled into the function via vercel.json's includeFiles.
-app.post(
+app.get(
   "/api/_bootstrap",
   {
     schema: {
