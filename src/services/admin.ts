@@ -1,5 +1,6 @@
-import { AdminRole, AnnouncementAudience, AnnouncementSeverity, Prisma, SupportTicketPriority, SupportTicketStatus, WorkspaceStatus } from "@prisma/client";
+import { AdminRole, AnnouncementAudience, AnnouncementSeverity, Prisma, SupportTicketPriority, SupportTicketStatus, TeamRole, WorkspaceStatus } from "@prisma/client";
 
+import { generateRandomPassword, hashPassword } from "../lib/auth.js";
 import { env } from "../lib/env.js";
 import { prisma } from "../lib/prisma.js";
 import {
@@ -761,4 +762,93 @@ export async function replyToTicket(ticketId: string, input: { author: string; b
     summary: `Replied to ticket`,
   });
   return message;
+}
+
+export async function createTeamMemberForClient(
+  workspaceId: string,
+  input: {
+    email: string;
+    name: string;
+    role: TeamRole;
+    initials?: string;
+    color?: string;
+  },
+  adminId?: string,
+) {
+  const workspace = await prisma.workspace.findUniqueOrThrow({ where: { id: workspaceId } });
+  const password = generateRandomPassword(16);
+  const initials =
+    input.initials ??
+    input.name
+      .split(/\s+/)
+      .map((part) => part[0]?.toUpperCase() ?? "")
+      .join("")
+      .slice(0, 2);
+
+  const member = await prisma.teamMember.create({
+    data: {
+      id: createPrefixedId("team"),
+      workspaceId,
+      email: input.email.toLowerCase(),
+      name: input.name,
+      role: input.role,
+      initials,
+      color: input.color ?? "cyan",
+      passwordHash: await hashPassword(password),
+    },
+  });
+
+  await recordAudit({
+    adminId,
+    action: "team.created",
+    targetType: "teamMember",
+    targetId: member.id,
+    summary: `Added ${member.name} (${member.email}) to ${workspace.name}`,
+  });
+
+  return {
+    id: member.id,
+    workspaceId: member.workspaceId,
+    email: member.email,
+    name: member.name,
+    role: member.role,
+    initials: member.initials,
+    color: member.color,
+    password,
+  };
+}
+
+export async function resetTeamMemberPassword(memberId: string, adminId?: string) {
+  const member = await prisma.teamMember.findUniqueOrThrow({
+    where: { id: memberId },
+    include: { workspace: { select: { name: true } } },
+  });
+  const password = generateRandomPassword(16);
+
+  await prisma.teamMember.update({
+    where: { id: memberId },
+    data: { passwordHash: await hashPassword(password) },
+  });
+
+  // Revoke any active portal sessions so the old session can't keep using
+  // the previous credentials.
+  await prisma.session.deleteMany({
+    where: { subjectType: "team", subjectId: memberId },
+  });
+
+  await recordAudit({
+    adminId,
+    action: "team.password_reset",
+    targetType: "teamMember",
+    targetId: memberId,
+    summary: `Reset password for ${member.email} (${member.workspace.name})`,
+  });
+
+  return {
+    id: member.id,
+    email: member.email,
+    name: member.name,
+    workspaceId: member.workspaceId,
+    password,
+  };
 }

@@ -13,6 +13,7 @@ import type {
   NotificationEventType,
   SupportTicketPriority,
   SupportTicketStatus,
+  TeamRole,
   WorkspaceStatus,
 } from "@prisma/client";
 import { SessionSubject } from "@prisma/client";
@@ -51,6 +52,7 @@ import { sendTestWebhook } from "./services/webhooks.js";
 import {
   createClient,
   createPlan,
+  createTeamMemberForClient,
   deactivateAdmin,
   deleteClient,
   deletePlan,
@@ -67,6 +69,7 @@ import {
   listSupportTickets,
   publishAnnouncement,
   replyToTicket,
+  resetTeamMemberPassword,
   retractAnnouncement,
   setClientStatus,
   updateAdmin,
@@ -1432,6 +1435,51 @@ app.post(
     },
   },
   async (request) => impersonateClient(request.params.workspaceId, adminId(request)),
+);
+
+const newTeamMemberBody = Type.Object({
+  email: Type.String({ format: "email", minLength: 1 }),
+  name: Type.String({ minLength: 1 }),
+  role: Type.Union([Type.Literal("owner"), Type.Literal("admin"), Type.Literal("viewer")]),
+  initials: Type.Optional(Type.String({ minLength: 1, maxLength: 4 })),
+  color: Type.Optional(Type.String({ minLength: 1 })),
+});
+
+app.post(
+  "/api/admin/clients/:workspaceId/team-members",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary:
+        "Create a portal team member for a client. Generates and returns a random password (shown once).",
+      params: Type.Object({ workspaceId: Type.String() }),
+      body: newTeamMemberBody,
+    },
+  },
+  async (request, reply) => {
+    const body = request.body as Static<typeof newTeamMemberBody>;
+    const created = await createTeamMemberForClient(
+      request.params.workspaceId,
+      { ...body, role: body.role as TeamRole },
+      adminId(request),
+    );
+    reply.code(201);
+    return created;
+  },
+);
+
+app.post(
+  "/api/admin/team-members/:memberId/reset-password",
+  {
+    schema: {
+      tags: ["Admin / Clients"],
+      summary:
+        "Reset a team member's portal password. Generates and returns a new random password (shown once). Existing portal sessions for this member are revoked.",
+      params: Type.Object({ memberId: Type.String() }),
+    },
+  },
+  async (request) =>
+    resetTeamMemberPassword(request.params.memberId, adminId(request)),
 );
 
 app.delete(
