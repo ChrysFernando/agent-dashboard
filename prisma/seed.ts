@@ -786,6 +786,123 @@ export async function runSeed(): Promise<SeededCredential[]> {
   return SEEDED_CREDENTIALS;
 }
 
+// Lightweight seed for Vercel deploys where the full demo seed exceeds
+// the function's 60s timeout. Creates the bare minimum needed to sign in:
+// the three plans, the default workspace, the super-admin, and one team
+// member. Demo data (transcripts, calls, billing, etc.) is skipped —
+// load it later via the full seed once the dashboard is reachable.
+export async function runMinimalSeed(): Promise<SeededCredential[]> {
+  const credentials: SeededCredential[] = [];
+
+  const planStarter = await prisma.plan.upsert({
+    where: { id: "plan_starter" },
+    create: {
+      id: "plan_starter",
+      slug: "starter",
+      name: "Starter",
+      description: "For pilots: 1 agent, voice or whatsapp, 500 included minutes.",
+      monthlyFeeCents: 14900,
+      includedVoiceMinutes: 500,
+      includedMessages: 1000,
+      maxAgents: 1,
+      maxKnowledgeDocuments: 10,
+      isPublic: true,
+    },
+    update: {},
+  });
+  const planScale = await prisma.plan.upsert({
+    where: { id: "plan_scale" },
+    create: {
+      id: "plan_scale",
+      slug: "scale",
+      name: "Scale",
+      description: "Production teams: up to 6 agents, all channels.",
+      monthlyFeeCents: 89900,
+      includedVoiceMinutes: 3000,
+      includedAiMinutes: 1500,
+      includedMessages: 25000,
+      maxAgents: 6,
+      isPublic: true,
+      isDefault: true,
+    },
+    update: {},
+  });
+  await prisma.plan.upsert({
+    where: { id: "plan_enterprise" },
+    create: {
+      id: "plan_enterprise",
+      slug: "enterprise",
+      name: "Enterprise",
+      description: "Unlimited agents, dedicated infra, custom SLAs.",
+      monthlyFeeCents: 249900,
+      isPublic: false,
+    },
+    update: {},
+  });
+
+  await prisma.workspace.upsert({
+    where: { id: DEFAULT_WORKSPACE_ID },
+    create: {
+      id: DEFAULT_WORKSPACE_ID,
+      name: env.workspace.name,
+      slug: "acme",
+      contactName: "Lina Rojas",
+      contactEmail: "ops@acme.test",
+      timezone: env.workspace.timezone,
+      defaultLanguage: env.workspace.defaultLanguage,
+      status: WorkspaceStatus.active,
+      monthlyBudgetCents: env.billing.monthlyBudgetCents,
+      planId: planScale.id,
+    },
+    update: {},
+  });
+
+  const superAdminPassword = generateRandomPassword(20);
+  await prisma.adminUser.upsert({
+    where: { email: SUPER_ADMIN_EMAIL },
+    create: {
+      id: "admin_root",
+      email: SUPER_ADMIN_EMAIL,
+      name: "Chrys (Super Admin)",
+      role: AdminRole.super_admin,
+      initials: "CS",
+      color: "#00d4ff",
+      isActive: true,
+      passwordHash: await hashPassword(superAdminPassword),
+      passwordChangedAt: new Date(),
+    },
+    update: {
+      passwordHash: await hashPassword(superAdminPassword),
+      passwordChangedAt: new Date(),
+    },
+  });
+  credentials.push({ role: "super_admin", email: SUPER_ADMIN_EMAIL, password: superAdminPassword });
+
+  const ownerPassword = generateRandomPassword(16);
+  await prisma.teamMember.upsert({
+    where: { email: "dilshan@aether.ai" },
+    create: {
+      id: createPrefixedId("team"),
+      workspaceId: DEFAULT_WORKSPACE_ID,
+      name: "Dilshan Perera",
+      email: "dilshan@aether.ai",
+      role: TeamRole.owner,
+      initials: "DP",
+      color: "cyan",
+      passwordHash: await hashPassword(ownerPassword),
+    },
+    update: {
+      passwordHash: await hashPassword(ownerPassword),
+    },
+  });
+  credentials.push({ role: "team:owner", email: "dilshan@aether.ai", password: ownerPassword });
+
+  // Suppress unused-var warning for planStarter; kept for clarity.
+  void planStarter;
+
+  return credentials;
+}
+
 function normalizeCallStatus(outcome: string): string {
   const normalized = outcome.toLowerCase();
   if (normalized.includes("no answer")) {

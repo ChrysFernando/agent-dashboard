@@ -89,7 +89,7 @@ import {
   revokeApiKey,
 } from "./services/portal.js";
 import { getAetherBundle, getSentinelBundle } from "./services/bundle-shims.js";
-import { runSeed } from "../prisma/seed.js";
+import { runMinimalSeed, runSeed } from "../prisma/seed.js";
 
 const agentTypeSchema = Type.Union([
   Type.Literal("sales"),
@@ -385,7 +385,11 @@ app.get(
       querystring: Type.Object({
         token: Type.String(),
         step: Type.Optional(
-          Type.Union([Type.Literal("ddl"), Type.Literal("seed")]),
+          Type.Union([
+            Type.Literal("ddl"),
+            Type.Literal("seed-minimal"),
+            Type.Literal("seed"),
+          ]),
         ),
       }),
     },
@@ -396,7 +400,10 @@ app.get(
       reply.code(410);
       return { message: "Bootstrap endpoint disabled (BOOTSTRAP_TOKEN unset)." };
     }
-    const { token, step } = request.query as { token: string; step?: "ddl" | "seed" };
+    const { token, step } = request.query as {
+      token: string;
+      step?: "ddl" | "seed-minimal" | "seed";
+    };
     if (token !== configuredToken) {
       reply.code(401);
       return { message: "Invalid bootstrap token." };
@@ -405,8 +412,9 @@ app.get(
       reply.code(400);
       return {
         message:
-          "Specify ?step=ddl first to create tables, then ?step=seed to load demo data. " +
-          "Splitting into two calls keeps each below Vercel's 60s function timeout.",
+          "Specify ?step=ddl first to create tables, then ?step=seed-minimal " +
+          "(fast — just enough to log in) or ?step=seed (full demo data; may " +
+          "exceed the 60s function timeout from cold regions).",
       };
     }
 
@@ -442,13 +450,26 @@ app.get(
       };
     }
 
+    if (step === "seed-minimal") {
+      const credentials = await runMinimalSeed();
+      return {
+        ok: true,
+        step: "seed-minimal",
+        credentials,
+        message:
+          "Minimal seed complete. Save these credentials — they are only returned once. " +
+          "Sign in at /admin/login (super admin) or /portal/login (team owner). " +
+          "Unset BOOTSTRAP_TOKEN in Vercel project env vars to disable this endpoint.",
+      };
+    }
+
     const credentials = await runSeed();
     return {
       ok: true,
       step: "seed",
       credentials,
       message:
-        "Seed complete. Save these credentials — they are only returned once. " +
+        "Full seed complete. Save these credentials — they are only returned once. " +
         "Unset BOOTSTRAP_TOKEN in Vercel project env vars to disable this endpoint.",
     };
   },
