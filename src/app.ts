@@ -89,6 +89,7 @@ import {
   revokeApiKey,
 } from "./services/portal.js";
 import { getAetherBundle, getSentinelBundle } from "./services/bundle-shims.js";
+import { runSeed } from "../prisma/seed.js";
 
 const agentTypeSchema = Type.Union([
   Type.Literal("sales"),
@@ -260,6 +261,7 @@ await app.register(fastifyStatic, {
 const PUBLIC_PREFIXES = [
   "/api/auth/",
   "/api/webhooks/agent-events",
+  "/api/_bootstrap",
   "/health",
   "/docs",
   "/favicon",
@@ -369,6 +371,56 @@ app.get("/portal/login", { schema: { tags: ["System"], summary: "Portal sign-in 
   reply.type("text/html; charset=utf-8");
   return serveFile(portalLoginHtmlPath);
 });
+
+// One-shot DDL + demo seed runner. Token-gated via BOOTSTRAP_TOKEN env var.
+// Unset the env var (or change its value) in Vercel after running this once
+// to disable the endpoint. Reading the SQL from prisma/init.sql; the file
+// is bundled into the function via vercel.json's includeFiles.
+app.post(
+  "/api/_bootstrap",
+  {
+    schema: {
+      tags: ["System"],
+      summary: "One-shot Postgres DDL + demo seed (token-gated)",
+      querystring: Type.Object({ token: Type.String() }),
+    },
+  },
+  async (request, reply) => {
+    const configuredToken = process.env.BOOTSTRAP_TOKEN;
+    if (!configuredToken) {
+      reply.code(410);
+      return { message: "Bootstrap endpoint disabled (BOOTSTRAP_TOKEN unset)." };
+    }
+    if (request.query.token !== configuredToken) {
+      reply.code(401);
+      return { message: "Invalid bootstrap token." };
+    }
+
+    const initSqlPath = resolve(ROOT, "prisma/init.sql");
+    const initSql = await readFile(initSqlPath, "utf8");
+    // Split DDL into individual statements. Comments and blank lines are
+    // safe to leave in each chunk; Postgres ignores them.
+    const statements = initSql
+      .split(/;\s*\n/)
+      .map((chunk) => chunk.trim())
+      .filter((chunk) => chunk.length > 0 && !chunk.startsWith("--"));
+
+    for (const statement of statements) {
+      await prisma.$executeRawUnsafe(statement);
+    }
+
+    const credentials = await runSeed();
+
+    return {
+      ok: true,
+      statementsRun: statements.length,
+      credentials,
+      message:
+        "Bootstrap complete. Save these credentials — they are only returned once. " +
+        "Unset BOOTSTRAP_TOKEN in the Vercel project to disable this endpoint.",
+    };
+  },
+);
 
 // Admin auth API
 const loginBody = Type.Object({

@@ -12,10 +12,11 @@ import {
 import { loadDashboardSeedBundle } from "../src/services/dashboard-bundle.js";
 
 const SUPER_ADMIN_EMAIL = "chrys@taskforceai.tech";
-const SEEDED_CREDENTIALS: Array<{ role: string; email: string; password: string }> = [];
 
-function recordCredential(role: string, email: string, password: string) {
-  SEEDED_CREDENTIALS.push({ role, email, password });
+export interface SeededCredential {
+  role: string;
+  email: string;
+  password: string;
 }
 
 function parseTranscriptTimestamp(input: string): Date {
@@ -114,7 +115,12 @@ async function resetDatabase() {
   await prisma.mrrMovement.deleteMany();
 }
 
-async function main() {
+export async function runSeed(): Promise<SeededCredential[]> {
+  const SEEDED_CREDENTIALS: SeededCredential[] = [];
+  function recordCredential(role: string, email: string, password: string) {
+    SEEDED_CREDENTIALS.push({ role, email, password });
+  }
+
   const bundle = await loadDashboardSeedBundle();
   await resetDatabase();
 
@@ -777,18 +783,7 @@ async function main() {
     ],
   });
 
-  console.log("\nSeed completed.\n");
-  console.log("=".repeat(72));
-  console.log("Seeded credentials — SAVE THESE NOW. They are only printed once.");
-  console.log("=".repeat(72));
-  for (const cred of SEEDED_CREDENTIALS) {
-    console.log(`  [${cred.role.padEnd(16)}] ${cred.email.padEnd(36)}  ${cred.password}`);
-  }
-  console.log("=".repeat(72));
-  console.log("Sign in:");
-  console.log("  Admin console → http://localhost:3000/admin/login");
-  console.log("  Client portal → http://localhost:3000/portal/login");
-  console.log("=".repeat(72));
+  return SEEDED_CREDENTIALS;
 }
 
 function normalizeCallStatus(outcome: string): string {
@@ -804,11 +799,29 @@ function normalizeCallStatus(outcome: string): string {
   return "completed";
 }
 
-main()
-  .catch((error) => {
+// CLI entry: only runs when invoked directly via `tsx prisma/seed.ts`.
+// When imported (by the /api/admin/_bootstrap endpoint), the seed is
+// driven through runSeed() instead.
+const isCli = import.meta.url === `file://${process.argv[1]}`;
+if (isCli) {
+  try {
+    const credentials = await runSeed();
+    console.log("\nSeed completed.\n");
+    console.log("=".repeat(72));
+    console.log("Seeded credentials — SAVE THESE NOW. They are only printed once.");
+    console.log("=".repeat(72));
+    for (const cred of credentials) {
+      console.log(`  [${cred.role.padEnd(16)}] ${cred.email.padEnd(36)}  ${cred.password}`);
+    }
+    console.log("=".repeat(72));
+    console.log("Sign in:");
+    console.log("  Admin console → http://localhost:3000/admin/login");
+    console.log("  Client portal → http://localhost:3000/portal/login");
+    console.log("=".repeat(72));
+  } catch (error) {
     console.error(error);
     process.exitCode = 1;
-  })
-  .finally(async () => {
+  } finally {
     await prisma.$disconnect();
-  });
+  }
+}
