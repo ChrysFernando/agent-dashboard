@@ -122,7 +122,7 @@ export function cookieOptions(maxAgeSeconds = SESSION_TTL_HOURS * 3600) {
   return {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: false,
+    secure: process.env.NODE_ENV === "production",
     path: "/",
     maxAge: maxAgeSeconds,
   };

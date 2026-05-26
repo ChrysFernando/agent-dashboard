@@ -4,10 +4,17 @@ import { z } from "zod";
 
 config();
 
+// Vercel's Postgres integrations (Neon, Supabase, etc.) inject POSTGRES_PRISMA_URL
+// (pooled, for app queries) and POSTGRES_URL_NON_POOLING (direct, for migrations).
+// Use the pooled URL as DATABASE_URL if the latter isn't set explicitly.
+if (!process.env.DATABASE_URL && process.env.POSTGRES_PRISMA_URL) {
+  process.env.DATABASE_URL = process.env.POSTGRES_PRISMA_URL;
+}
+
 const envSchema = z.object({
   PORT: z.coerce.number().int().positive().default(3000),
   HOST: z.string().min(1).default("0.0.0.0"),
-  DATABASE_URL: z.string().min(1).default("file:./dev.db"),
+  DATABASE_URL: z.string().min(1).default("postgresql://user:pass@localhost:5432/agent_dashboard"),
   DASHBOARD_HTML_PATH: z.string().min(1).default("./Aether AI Agent Dashboard.html"),
   WORKSPACE_NAME: z.string().min(1).default("Acme Corp"),
   WORKSPACE_TIMEZONE: z.string().min(1).default("Asia/Colombo (UTC+05:30)"),
@@ -40,27 +47,8 @@ function resolveDashboardPath(input: string): string {
   return isAbsolute(input) ? input : resolve(process.cwd(), input);
 }
 
-function normalizeDatabaseUrl(input: string): string {
-  if (!input.startsWith("file:")) {
-    return input;
-  }
-
-  const filePath = input.slice("file:".length);
-  if (!filePath) {
-    return input;
-  }
-
-  const toFileUrlPath = (value: string) => value.replace(/\\/g, "/");
-
-  if (isAbsolute(filePath) || /^[A-Za-z]:[\\/]/.test(filePath)) {
-    return `file:${toFileUrlPath(filePath)}`;
-  }
-
-  return `file:${toFileUrlPath(resolve(process.cwd(), filePath))}`;
-}
-
 const rawEnv = envSchema.parse(process.env);
-const databaseUrl = normalizeDatabaseUrl(rawEnv.DATABASE_URL);
+const databaseUrl = rawEnv.DATABASE_URL;
 process.env.DATABASE_URL = databaseUrl;
 
 export const env = {
