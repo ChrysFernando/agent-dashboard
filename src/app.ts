@@ -364,11 +364,21 @@ app.addHook("preHandler", async (request, reply) => {
 // @fastify/static would otherwise return 404 under /admin/ and /portal/.
 const adminLoginHtmlPath = resolve(ROOT, "src/ui/admin-login.html");
 const portalLoginHtmlPath = resolve(ROOT, "src/ui/portal-login.html");
+const adminToolsHtmlPath = resolve(ROOT, "src/ui/admin-tools.html");
 
 app.get("/admin/login", { schema: { tags: ["System"], summary: "Admin sign-in page" } }, async (_req, reply) => {
   reply.type("text/html; charset=utf-8");
   return serveFile(adminLoginHtmlPath);
 });
+
+app.get(
+  "/admin/tools",
+  { schema: { tags: ["System"], summary: "Admin tools page (create clients, reset passwords)" } },
+  async (_req, reply) => {
+    reply.type("text/html; charset=utf-8");
+    return serveFile(adminToolsHtmlPath);
+  },
+);
 
 app.get("/portal/login", { schema: { tags: ["System"], summary: "Portal sign-in page" } }, async (_req, reply) => {
   reply.type("text/html; charset=utf-8");

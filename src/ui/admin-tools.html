@@ -1,0 +1,316 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Sentinel · Admin tools</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #07090f;
+    --panel: #0f1320;
+    --panel-2: #131a2c;
+    --border: #1f2942;
+    --text: #e6ecff;
+    --muted: #8a93b0;
+    --accent: #00d4ff;
+    --accent-2: #7b61ff;
+    --danger: #ff5d7a;
+    --success: #00e5a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+  }
+  header {
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  header .who { color: var(--muted); font-size: 13px; }
+  main { max-width: 980px; margin: 0 auto; padding: 32px; }
+  section { background: var(--panel); border: 1px solid var(--border); border-radius: 12px; padding: 20px 24px; margin-bottom: 24px; }
+  section h2 { margin: 0 0 12px; font-size: 15px; font-weight: 600; color: var(--accent); letter-spacing: 0.02em; text-transform: uppercase; }
+  label { display: block; font-size: 12px; color: var(--muted); margin-top: 12px; margin-bottom: 4px; }
+  input, select {
+    width: 100%;
+    padding: 9px 12px;
+    background: var(--panel-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text);
+    font: inherit;
+  }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  .row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  button {
+    padding: 9px 16px;
+    background: linear-gradient(135deg, var(--accent), var(--accent-2));
+    border: 0;
+    border-radius: 8px;
+    color: #07090f;
+    font-weight: 600;
+    cursor: pointer;
+    margin-top: 14px;
+  }
+  button:disabled { opacity: 0.5; cursor: wait; }
+  button.ghost { background: transparent; color: var(--text); border: 1px solid var(--border); }
+  button.danger { background: var(--danger); color: white; }
+  button.small { padding: 5px 10px; font-size: 12px; margin: 0; }
+  .stack > * + * { margin-top: 8px; }
+  .client {
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    background: var(--panel-2);
+  }
+  .client header { padding: 0; border: 0; }
+  .client h3 { margin: 0; font-size: 15px; }
+  .client .meta { color: var(--muted); font-size: 12px; }
+  .members { margin-top: 12px; }
+  .member { display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-top: 1px solid var(--border); font-size: 13px; }
+  .member .email { font-family: ui-monospace, "JetBrains Mono", monospace; color: var(--text); }
+  .member .role { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; margin-left: 8px; }
+  .credentials {
+    background: rgba(0, 229, 160, 0.08);
+    border: 1px solid rgba(0, 229, 160, 0.4);
+    border-radius: 8px;
+    padding: 12px 14px;
+    margin-top: 10px;
+    font-family: ui-monospace, "JetBrains Mono", monospace;
+    font-size: 13px;
+  }
+  .credentials .label { color: var(--muted); font-family: inherit; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
+  .credentials .pw { color: var(--success); user-select: all; }
+  .credentials .hint { color: var(--muted); font-size: 11px; margin-top: 6px; }
+  .error { color: var(--danger); font-size: 13px; margin-top: 8px; }
+  .add-member { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; align-items: flex-end; }
+  .add-member input, .add-member select { padding: 6px 10px; font-size: 13px; }
+  .add-member button { margin: 0; padding: 7px 12px; font-size: 13px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Sentinel · Admin tools</h1>
+  <div class="who" id="who">…</div>
+</header>
+<main>
+
+<section>
+  <h2>Create a new client</h2>
+  <div class="row">
+    <div>
+      <label>Workspace name</label>
+      <input id="new-name" placeholder="Helio Health" />
+    </div>
+    <div>
+      <label>Plan</label>
+      <select id="new-plan"></select>
+    </div>
+  </div>
+  <div class="row">
+    <div>
+      <label>Owner email (becomes first portal user)</label>
+      <input id="new-owner-email" type="email" placeholder="owner@helio.test" />
+    </div>
+    <div>
+      <label>Owner name</label>
+      <input id="new-owner-name" placeholder="Priya Suresh" />
+    </div>
+  </div>
+  <button id="create-btn">Create client &amp; owner</button>
+  <div id="create-result"></div>
+</section>
+
+<section>
+  <h2>Existing clients</h2>
+  <div id="clients">Loading…</div>
+</section>
+
+</main>
+
+<script>
+const $ = (sel) => document.querySelector(sel);
+const fmtCreds = (label, email, password) => `
+  <div class="credentials">
+    <div class="label">${label}</div>
+    <div>${email}</div>
+    <div class="pw">${password}</div>
+    <div class="hint">Save this password now — it's not retrievable.</div>
+  </div>
+`;
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    credentials: "same-origin",
+    headers: body ? { "content-type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ message: res.statusText }));
+    throw new Error(err.message || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+async function init() {
+  try {
+    const me = await api("GET", "/api/auth/admin/me");
+    $("#who").textContent = `${me.email} · ${me.role}`;
+  } catch {
+    location.href = "/admin/login?next=" + encodeURIComponent(location.pathname);
+    return;
+  }
+
+  const plans = await api("GET", "/api/admin/plans");
+  const planSel = $("#new-plan");
+  planSel.innerHTML = plans.map((p) => `<option value="${p.id}" ${p.isDefault ? "selected" : ""}>${p.name}</option>`).join("");
+
+  await renderClients();
+}
+
+async function renderClients() {
+  const wrap = $("#clients");
+  wrap.textContent = "Loading…";
+  const clients = await api("GET", "/api/admin/clients");
+  if (clients.length === 0) {
+    wrap.innerHTML = "<p style='color:var(--muted)'>No clients yet.</p>";
+    return;
+  }
+
+  const expanded = await Promise.all(clients.map((c) => api("GET", `/api/admin/clients/${c.id}`)));
+  wrap.innerHTML = "";
+  for (const c of expanded) {
+    const div = document.createElement("div");
+    div.className = "client";
+    div.innerHTML = `
+      <header style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <h3>${escape(c.name)}</h3>
+          <div class="meta">${escape(c.slug)} · ${c.status} · ${c.teamMembers.length} member(s)</div>
+        </div>
+      </header>
+      <div class="members" id="members-${c.id}">
+        ${c.teamMembers.map((m) => `
+          <div class="member">
+            <div><span class="email">${escape(m.email)}</span><span class="role">${escape(m.role)}</span></div>
+            <button class="small ghost" data-action="reset" data-id="${m.id}">Reset password</button>
+          </div>
+        `).join("")}
+      </div>
+      <div class="add-member">
+        <input data-add-email type="email" placeholder="email" style="flex:1 1 200px" />
+        <input data-add-name placeholder="full name" style="flex:1 1 150px" />
+        <select data-add-role><option value="owner">Owner</option><option value="admin" selected>Admin</option><option value="viewer">Viewer</option></select>
+        <button class="small" data-action="add" data-id="${c.id}">Add member</button>
+      </div>
+      <div data-result></div>
+    `;
+    wrap.appendChild(div);
+  }
+
+  wrap.addEventListener("click", onClientAction, { once: true });
+  // re-attach since we replaced innerHTML
+  wrap.removeEventListener("click", onClientAction);
+  wrap.addEventListener("click", onClientAction);
+}
+
+async function onClientAction(event) {
+  const btn = event.target.closest("button[data-action]");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const id = btn.dataset.id;
+  const card = btn.closest(".client");
+  const resultDiv = card.querySelector("[data-result]");
+  btn.disabled = true;
+
+  try {
+    if (action === "reset") {
+      if (!confirm("Reset this member's password? Their current portal sessions will be killed.")) {
+        btn.disabled = false;
+        return;
+      }
+      const out = await api("POST", `/api/admin/team-members/${id}/reset-password`);
+      resultDiv.innerHTML = fmtCreds("New password for " + out.email, out.email, out.password);
+    } else if (action === "add") {
+      const email = card.querySelector("[data-add-email]").value.trim();
+      const name = card.querySelector("[data-add-name]").value.trim();
+      const role = card.querySelector("[data-add-role]").value;
+      if (!email || !name) {
+        resultDiv.innerHTML = `<div class="error">Email and name are required.</div>`;
+        btn.disabled = false;
+        return;
+      }
+      const out = await api("POST", `/api/admin/clients/${id}/team-members`, { email, name, role });
+      resultDiv.innerHTML = fmtCreds("New portal user for " + out.email, out.email, out.password);
+      // refresh members list
+      await renderClients();
+    }
+  } catch (err) {
+    resultDiv.innerHTML = `<div class="error">${escape(err.message)}</div>`;
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+$("#create-btn").addEventListener("click", async () => {
+  const name = $("#new-name").value.trim();
+  const planId = $("#new-plan").value;
+  const ownerEmail = $("#new-owner-email").value.trim();
+  const ownerName = $("#new-owner-name").value.trim();
+  const result = $("#create-result");
+  result.innerHTML = "";
+  if (!name || !ownerEmail || !ownerName) {
+    result.innerHTML = `<div class="error">All fields are required.</div>`;
+    return;
+  }
+  $("#create-btn").disabled = true;
+  try {
+    const workspace = await api("POST", "/api/admin/clients", {
+      name,
+      planId,
+      contactEmail: ownerEmail,
+      contactName: ownerName,
+      status: "active",
+    });
+    const owner = await api("POST", `/api/admin/clients/${workspace.id}/team-members`, {
+      email: ownerEmail,
+      name: ownerName,
+      role: "owner",
+    });
+    result.innerHTML = `
+      <div class="credentials">
+        <div class="label">Client created · ${escape(workspace.name)}</div>
+        <div>${escape(owner.email)}</div>
+        <div class="pw">${owner.password}</div>
+        <div class="hint">Save now. They sign in at <a href="/portal/login" style="color:var(--accent)">/portal/login</a>.</div>
+      </div>
+    `;
+    $("#new-name").value = "";
+    $("#new-owner-email").value = "";
+    $("#new-owner-name").value = "";
+    await renderClients();
+  } catch (err) {
+    result.innerHTML = `<div class="error">${escape(err.message)}</div>`;
+  } finally {
+    $("#create-btn").disabled = false;
+  }
+});
+
+function escape(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+init();
+</script>
+</body>
+</html>
