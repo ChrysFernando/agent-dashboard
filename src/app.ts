@@ -381,8 +381,13 @@ app.get(
   {
     schema: {
       tags: ["System"],
-      summary: "One-shot Postgres DDL + demo seed (token-gated)",
-      querystring: Type.Object({ token: Type.String() }),
+      summary: "One-shot Postgres DDL + demo seed (token-gated, two-phase)",
+      querystring: Type.Object({
+        token: Type.String(),
+        step: Type.Optional(
+          Type.Union([Type.Literal("ddl"), Type.Literal("seed")]),
+        ),
+      }),
     },
   },
   async (request, reply) => {
@@ -391,54 +396,60 @@ app.get(
       reply.code(410);
       return { message: "Bootstrap endpoint disabled (BOOTSTRAP_TOKEN unset)." };
     }
-    if (request.query.token !== configuredToken) {
+    const { token, step } = request.query as { token: string; step?: "ddl" | "seed" };
+    if (token !== configuredToken) {
       reply.code(401);
       return { message: "Invalid bootstrap token." };
     }
+    if (!step) {
+      reply.code(400);
+      return {
+        message:
+          "Specify ?step=ddl first to create tables, then ?step=seed to load demo data. " +
+          "Splitting into two calls keeps each below Vercel's 60s function timeout.",
+      };
+    }
 
-    // Serialize concurrent bootstrap invocations via a Postgres advisory
-    // lock — a single 502 retry can otherwise kick off a second run that
-    // races against the first and leaves the schema half-built.
-    // pg_advisory_lock blocks until acquired; the lock is auto-released
-    // when the function's connection ends.
-    await prisma.$executeRawUnsafe("SELECT pg_advisory_lock(987654321)");
+    if (step === "ddl") {
+      // Reset the schema so this step is safely re-runnable: any partial
+      // state from a prior failed bootstrap (orphaned enums/tables) is
+      // cleared, then init.sql recreates everything from scratch.
+      await prisma.$executeRawUnsafe('DROP SCHEMA IF EXISTS "public" CASCADE');
+      await prisma.$executeRawUnsafe('CREATE SCHEMA "public"');
 
-    // Reset the schema each run so this endpoint is safely re-runnable:
-    // any partial state from a prior bootstrap (failed midway, orphaned
-    // enums/tables) is cleared, then init.sql recreates everything.
-    await prisma.$executeRawUnsafe('DROP SCHEMA IF EXISTS "public" CASCADE');
-    await prisma.$executeRawUnsafe('CREATE SCHEMA "public"');
+      const initSqlPath = resolve(ROOT, "prisma/init.sql");
+      const initSql = await readFile(initSqlPath, "utf8");
+      const statements = initSql
+        .split(/;\s*\n/)
+        .map((chunk) =>
+          chunk
+            .split("\n")
+            .filter((line) => !line.trim().startsWith("--"))
+            .join("\n")
+            .trim(),
+        )
+        .filter((chunk) => chunk.length > 0);
 
-    const initSqlPath = resolve(ROOT, "prisma/init.sql");
-    const initSql = await readFile(initSqlPath, "utf8");
-    // Each chunk from prisma's migrate-diff output begins with a
-    // `-- CreateTable`-style header followed by the actual statement;
-    // strip those comment-only lines before sending each chunk to Postgres.
-    const statements = initSql
-      .split(/;\s*\n/)
-      .map((chunk) =>
-        chunk
-          .split("\n")
-          .filter((line) => !line.trim().startsWith("--"))
-          .join("\n")
-          .trim(),
-      )
-      .filter((chunk) => chunk.length > 0);
+      for (const statement of statements) {
+        await prisma.$executeRawUnsafe(statement);
+      }
 
-    for (const statement of statements) {
-      await prisma.$executeRawUnsafe(statement);
+      return {
+        ok: true,
+        step: "ddl",
+        statementsRun: statements.length,
+        message: "Schema created. Call again with ?step=seed to load demo data.",
+      };
     }
 
     const credentials = await runSeed();
-    await prisma.$executeRawUnsafe("SELECT pg_advisory_unlock(987654321)");
-
     return {
       ok: true,
-      statementsRun: statements.length,
+      step: "seed",
       credentials,
       message:
-        "Bootstrap complete. Save these credentials — they are only returned once. " +
-        "Unset BOOTSTRAP_TOKEN in the Vercel project to disable this endpoint.",
+        "Seed complete. Save these credentials — they are only returned once. " +
+        "Unset BOOTSTRAP_TOKEN in Vercel project env vars to disable this endpoint.",
     };
   },
 );
