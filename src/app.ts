@@ -540,23 +540,21 @@ app.get(
   "/api/auth/admin/me",
   { schema: { tags: ["System"], summary: "Currently signed-in admin" } },
   async (request, reply) => {
-    const ctx = request.adminContext;
-    if (!ctx?.adminId) {
-      reply.code(401);
-      return { message: "Not signed in" };
-    }
-    const admin = await prisma.adminUser.findUnique({ where: { id: ctx.adminId } });
-    if (!admin) {
+    // /api/auth/* is exempt from the auth pre-handler so login is reachable,
+    // which means request.adminContext isn't populated here. Load the
+    // session straight from the cookie instead.
+    const loaded = await loadAdminFromSession(request.cookies?.[ADMIN_COOKIE]);
+    if (!loaded || !loaded.admin.isActive) {
       reply.code(401);
       return { message: "Not signed in" };
     }
     return {
-      id: admin.id,
-      email: admin.email,
-      name: admin.name,
-      role: admin.role,
-      initials: admin.initials,
-      color: admin.color,
+      id: loaded.admin.id,
+      email: loaded.admin.email,
+      name: loaded.admin.name,
+      role: loaded.admin.role,
+      initials: loaded.admin.initials,
+      color: loaded.admin.color,
     };
   },
 );
@@ -610,13 +608,15 @@ app.get(
   "/api/auth/portal/me",
   { schema: { tags: ["System"], summary: "Currently signed-in portal user" } },
   async (request, reply) => {
-    const ctx = request.portalContext;
-    if (!ctx?.teamMemberId) {
+    // /api/auth/* is exempt from the auth pre-handler, so request.portalContext
+    // isn't populated. Resolve the session from the cookie directly.
+    const loaded = await loadTeamMemberFromSession(request.cookies?.[PORTAL_COOKIE]);
+    if (!loaded) {
       reply.code(401);
       return { message: "Not signed in" };
     }
     const member = await prisma.teamMember.findUnique({
-      where: { id: ctx.teamMemberId },
+      where: { id: loaded.member.id },
       include: { workspace: { select: { id: true, name: true } } },
     });
     if (!member) {
