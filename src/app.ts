@@ -398,12 +398,20 @@ app.get(
 
     const initSqlPath = resolve(ROOT, "prisma/init.sql");
     const initSql = await readFile(initSqlPath, "utf8");
-    // Split DDL into individual statements. Comments and blank lines are
-    // safe to leave in each chunk; Postgres ignores them.
+    // Split DDL into individual statements. Each chunk from prisma's
+    // migrate-diff output begins with a `-- CreateTable`-style header
+    // followed by the actual statement; strip those comment-only lines
+    // before sending the chunk to Postgres.
     const statements = initSql
       .split(/;\s*\n/)
-      .map((chunk) => chunk.trim())
-      .filter((chunk) => chunk.length > 0 && !chunk.startsWith("--"));
+      .map((chunk) =>
+        chunk
+          .split("\n")
+          .filter((line) => !line.trim().startsWith("--"))
+          .join("\n")
+          .trim(),
+      )
+      .filter((chunk) => chunk.length > 0);
 
     for (const statement of statements) {
       await prisma.$executeRawUnsafe(statement);
