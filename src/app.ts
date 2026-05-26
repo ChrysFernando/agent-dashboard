@@ -396,9 +396,16 @@ app.get(
       return { message: "Invalid bootstrap token." };
     }
 
-    // Reset the schema so this endpoint is safely re-runnable: any partial
-    // prior bootstrap (failed midway, leaving orphaned enums or tables)
-    // gets cleared, then init.sql recreates everything from scratch.
+    // Serialize concurrent bootstrap invocations via a Postgres advisory
+    // lock — a single 502 retry can otherwise kick off a second run that
+    // races against the first and leaves the schema half-built.
+    // pg_advisory_lock blocks until acquired; the lock is auto-released
+    // when the function's connection ends.
+    await prisma.$executeRawUnsafe("SELECT pg_advisory_lock(987654321)");
+
+    // Reset the schema each run so this endpoint is safely re-runnable:
+    // any partial state from a prior bootstrap (failed midway, orphaned
+    // enums/tables) is cleared, then init.sql recreates everything.
     await prisma.$executeRawUnsafe('DROP SCHEMA IF EXISTS "public" CASCADE');
     await prisma.$executeRawUnsafe('CREATE SCHEMA "public"');
 
@@ -423,6 +430,7 @@ app.get(
     }
 
     const credentials = await runSeed();
+    await prisma.$executeRawUnsafe("SELECT pg_advisory_unlock(987654321)");
 
     return {
       ok: true,
