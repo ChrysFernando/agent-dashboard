@@ -396,12 +396,17 @@ app.get(
       return { message: "Invalid bootstrap token." };
     }
 
+    // Reset the schema so this endpoint is safely re-runnable: any partial
+    // prior bootstrap (failed midway, leaving orphaned enums or tables)
+    // gets cleared, then init.sql recreates everything from scratch.
+    await prisma.$executeRawUnsafe('DROP SCHEMA IF EXISTS "public" CASCADE');
+    await prisma.$executeRawUnsafe('CREATE SCHEMA "public"');
+
     const initSqlPath = resolve(ROOT, "prisma/init.sql");
     const initSql = await readFile(initSqlPath, "utf8");
-    // Split DDL into individual statements. Each chunk from prisma's
-    // migrate-diff output begins with a `-- CreateTable`-style header
-    // followed by the actual statement; strip those comment-only lines
-    // before sending the chunk to Postgres.
+    // Each chunk from prisma's migrate-diff output begins with a
+    // `-- CreateTable`-style header followed by the actual statement;
+    // strip those comment-only lines before sending each chunk to Postgres.
     const statements = initSql
       .split(/;\s*\n/)
       .map((chunk) =>
