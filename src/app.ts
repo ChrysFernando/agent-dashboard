@@ -750,6 +750,8 @@ app.get(
 );
 
 const createAgentBody = Type.Object({
+  id: Type.Optional(Type.String({ minLength: 1 })),
+  externalId: Type.Optional(Type.String({ minLength: 1 })),
   name: Type.String({ minLength: 1 }),
   type: agentTypeSchema,
   status: Type.Optional(agentStatusSchema),
@@ -770,17 +772,19 @@ app.post(
   {
     schema: {
       tags: ["Agents"],
-      summary: "Create an agent",
+      summary:
+        "Create an agent. Pass `id` to set a specific identifier (useful when an external runtime references this agent by a known DASHBOARD_AGENT_ID).",
       body: createAgentBody,
     },
   },
   async (request, reply) => {
     const body = request.body as CreateAgentBody;
-    const agentId = createPrefixedId("agt");
+    const agentId = body.id ?? createPrefixedId("agt");
 
     await prisma.agent.create({
       data: {
         id: agentId,
+        externalId: body.externalId,
         workspaceId: body.workspaceId ?? DEFAULT_WORKSPACE_ID,
         name: body.name,
         type: body.type,
@@ -1287,6 +1291,32 @@ app.get(
   "/api/admin/metrics",
   { schema: { tags: ["Admin / Metrics"], summary: "Platform-wide metrics across all clients" } },
   async () => getGlobalMetrics(),
+);
+
+app.get(
+  "/api/admin/integration-status",
+  {
+    schema: {
+      tags: ["Admin / Metrics"],
+      summary:
+        "Inbound-webhook integration status. Tells external runtimes (voice agents, chat workers) the URL to POST agent events to and whether the shared secret is configured.",
+    },
+  },
+  async (request) => {
+    const proto = (request.headers["x-forwarded-proto"] as string | undefined) ?? request.protocol;
+    const host = (request.headers["x-forwarded-host"] as string | undefined) ?? request.hostname;
+    return {
+      webhookEndpoint: `${proto}://${host}/api/webhooks/agent-events`,
+      webhookSecretConfigured: Boolean(env.inboundWebhookSecret),
+      runtimeEnvVarsForExternalAgent: {
+        DASHBOARD_API_URL: `${proto}://${host}`,
+        DASHBOARD_API_KEY: env.inboundWebhookSecret
+          ? "(set on this server — copy the INBOUND_WEBHOOK_SECRET value into the agent's .env)"
+          : "(NOT SET — add INBOUND_WEBHOOK_SECRET to this project's Vercel env vars and redeploy)",
+        DASHBOARD_AGENT_ID: "(set this to the id of the agent record in this dashboard)",
+      },
+    };
+  },
 );
 
 app.get(

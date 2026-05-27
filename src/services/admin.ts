@@ -165,6 +165,10 @@ export async function getClient(workspaceId: string) {
       teamMembers: true,
       notifications: true,
       apiKeys: true,
+      agents: {
+        include: { channels: true },
+        orderBy: { createdAt: "asc" },
+      },
       supportTickets: {
         include: { messages: true },
         orderBy: { createdAt: "desc" },

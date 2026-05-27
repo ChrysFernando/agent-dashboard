@@ -104,6 +104,11 @@
 </header>
 <main>
 
+<section id="integration">
+  <h2>Inbound webhook integration</h2>
+  <div id="integration-body">Checking…</div>
+</section>
+
 <section>
   <h2>Create a new client</h2>
   <div class="row">
@@ -175,7 +180,38 @@ async function init() {
   const planSel = $("#new-plan");
   planSel.innerHTML = plans.map((p) => `<option value="${p.id}" ${p.isDefault ? "selected" : ""}>${p.name}</option>`).join("");
 
+  await renderIntegrationStatus();
   await renderClients();
+}
+
+async function renderIntegrationStatus() {
+  const target = $("#integration-body");
+  try {
+    const s = await api("GET", "/api/admin/integration-status");
+    const okClass = s.webhookSecretConfigured
+      ? "background:rgba(0,229,160,0.08);border-color:rgba(0,229,160,0.4)"
+      : "background:rgba(255,93,122,0.08);border-color:rgba(255,93,122,0.4)";
+    const status = s.webhookSecretConfigured
+      ? `<span style="color:var(--success);">✓ Shared secret configured</span>`
+      : `<span style="color:var(--danger);">✗ INBOUND_WEBHOOK_SECRET not set — voice agents can POST but no auth is enforced</span>`;
+    target.innerHTML = `
+      <div class="credentials" style="${okClass}">
+        <div class="label">Inbound webhook URL (external runtimes POST here)</div>
+        <div class="pw">${escape(s.webhookEndpoint)}</div>
+        <div class="hint">${status}</div>
+      </div>
+      <div style="margin-top:14px;font-size:13px;color:var(--muted);line-height:1.7;">
+        On the external runtime (e.g. the voice agent box), set:
+        <ul style="margin:6px 0 0 18px;padding:0;">
+          <li><code>DASHBOARD_API_URL</code> = <code style="color:var(--text);">${escape(s.runtimeEnvVarsForExternalAgent.DASHBOARD_API_URL)}</code></li>
+          <li><code>DASHBOARD_API_KEY</code> = ${escape(s.runtimeEnvVarsForExternalAgent.DASHBOARD_API_KEY)}</li>
+          <li><code>DASHBOARD_AGENT_ID</code> = ${escape(s.runtimeEnvVarsForExternalAgent.DASHBOARD_AGENT_ID)}</li>
+        </ul>
+      </div>
+    `;
+  } catch (err) {
+    target.innerHTML = `<div class="error">${escape(err.message)}</div>`;
+  }
 }
 
 async function renderClients() {
@@ -192,13 +228,16 @@ async function renderClients() {
   for (const c of expanded) {
     const div = document.createElement("div");
     div.className = "client";
+    const agents = c.agents ?? [];
     div.innerHTML = `
       <header style="display:flex;justify-content:space-between;align-items:center;">
         <div>
           <h3>${escape(c.name)}</h3>
-          <div class="meta">${escape(c.slug)} · ${c.status} · ${c.teamMembers.length} member(s)</div>
+          <div class="meta">${escape(c.slug)} · ${c.status} · ${c.teamMembers.length} member(s) · ${agents.length} agent(s)</div>
         </div>
       </header>
+
+      <div class="meta" style="margin-top:10px;text-transform:uppercase;letter-spacing:.05em;font-size:11px;color:var(--accent);">Portal users</div>
       <div class="members" id="members-${c.id}">
         ${c.teamMembers.map((m) => `
           <div class="member">
@@ -213,6 +252,38 @@ async function renderClients() {
         <select data-add-role><option value="owner">Owner</option><option value="admin" selected>Admin</option><option value="viewer">Viewer</option></select>
         <button class="small" data-action="add" data-id="${c.id}">Add member</button>
       </div>
+
+      <div class="meta" style="margin-top:18px;text-transform:uppercase;letter-spacing:.05em;font-size:11px;color:var(--accent);">Agents</div>
+      <div class="members" id="agents-${c.id}">
+        ${agents.length === 0
+          ? `<div class="meta" style="padding:8px 0;">No agents yet.</div>`
+          : agents.map((a) => `
+              <div class="member">
+                <div>
+                  <span class="email">${escape(a.name)}</span>
+                  <span class="role">${escape(a.type)} · ${escape(a.status)} · ${(a.channels ?? []).map((ch) => escape(ch.channel)).join(", ") || "no channels"}</span>
+                  <div class="meta" style="font-family:ui-monospace,monospace;margin-top:2px;">id: ${escape(a.id)}</div>
+                </div>
+              </div>
+            `).join("")}
+      </div>
+      <div class="add-member">
+        <input data-agent-id placeholder="agent id (optional, e.g. agt_kavya_treehouse)" style="flex:1 1 240px" />
+        <input data-agent-name placeholder="agent name" style="flex:1 1 150px" />
+        <select data-agent-type>
+          <option value="booking">Booking</option>
+          <option value="sales">Sales</option>
+          <option value="support">Support</option>
+          <option value="coldcall">Cold call</option>
+        </select>
+        <select data-agent-channel>
+          <option value="voice" selected>Voice</option>
+          <option value="whatsapp">WhatsApp</option>
+        </select>
+        <input data-agent-language placeholder="language (e.g. en)" style="flex:0 0 130px" />
+        <button class="small" data-action="add-agent" data-id="${c.id}">Add agent</button>
+      </div>
+
       <div data-result></div>
     `;
     wrap.appendChild(div);
@@ -253,6 +324,35 @@ async function onClientAction(event) {
       const out = await api("POST", `/api/admin/clients/${id}/team-members`, { email, name, role });
       resultDiv.innerHTML = fmtCreds("New portal user for " + out.email, out.email, out.password);
       // refresh members list
+      await renderClients();
+    } else if (action === "add-agent") {
+      const agentId = card.querySelector("[data-agent-id]").value.trim();
+      const name = card.querySelector("[data-agent-name]").value.trim();
+      const type = card.querySelector("[data-agent-type]").value;
+      const channel = card.querySelector("[data-agent-channel]").value;
+      const language = card.querySelector("[data-agent-language]").value.trim();
+      if (!name) {
+        resultDiv.innerHTML = `<div class="error">Agent name is required.</div>`;
+        btn.disabled = false;
+        return;
+      }
+      const body = {
+        workspaceId: id,
+        name,
+        type,
+        channels: [channel],
+      };
+      if (agentId) body.id = agentId;
+      if (language) body.language = language;
+      const created = await api("POST", "/api/agents", body);
+      resultDiv.innerHTML = `
+        <div class="credentials">
+          <div class="label">Agent created</div>
+          <div>${escape(created.name)}</div>
+          <div class="pw">${escape(created.id)}</div>
+          <div class="hint">Copy this id into the external runtime's <code>DASHBOARD_AGENT_ID</code> env var.</div>
+        </div>
+      `;
       await renderClients();
     }
   } catch (err) {
