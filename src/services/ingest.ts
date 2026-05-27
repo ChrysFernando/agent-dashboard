@@ -133,7 +133,12 @@ async function ensureAgent(payload: AgentWebhookPayload["agent"], channel?: Agen
   });
 }
 
-async function upsertCall(agentId: string, payload: NonNullable<AgentWebhookPayload["call"]>, fallbackOccurredAt: Date) {
+async function upsertCall(
+  agentId: string,
+  workspaceId: string | null,
+  payload: NonNullable<AgentWebhookPayload["call"]>,
+  fallbackOccurredAt: Date,
+) {
   const startedAt = toDateOrNull(payload.startedAt) ?? fallbackOccurredAt;
   const endedAt = toDateOrNull(payload.endedAt);
   const callId = payload.id ?? createPrefixedId("call");
@@ -141,6 +146,7 @@ async function upsertCall(agentId: string, payload: NonNullable<AgentWebhookPayl
   return prisma.call.upsert({
     where: { id: callId },
     update: {
+      workspaceId,
       direction: payload.direction,
       status: payload.status ?? "completed",
       outcome: payload.outcome,
@@ -157,6 +163,7 @@ async function upsertCall(agentId: string, payload: NonNullable<AgentWebhookPayl
     create: {
       id: callId,
       agentId,
+      workspaceId,
       direction: payload.direction,
       status: payload.status ?? "completed",
       outcome: payload.outcome,
@@ -175,6 +182,7 @@ async function upsertCall(agentId: string, payload: NonNullable<AgentWebhookPayl
 
 async function upsertTranscript(
   agentId: string,
+  workspaceId: string | null,
   channel: NonNullable<AgentWebhookPayload["channel"]>,
   payload: NonNullable<AgentWebhookPayload["transcript"]>,
   fallbackOccurredAt: Date,
@@ -188,6 +196,7 @@ async function upsertTranscript(
     where: { id: transcriptId },
     update: {
       agentId,
+      workspaceId,
       channel: channel as Channel,
       contact: "unknown",
       callId,
@@ -206,6 +215,7 @@ async function upsertTranscript(
     create: {
       id: transcriptId,
       agentId,
+      workspaceId,
       channel: channel as Channel,
       contact: "unknown",
       callId,
@@ -253,6 +263,7 @@ async function upsertTranscript(
 
 async function upsertMessageEvent(
   agentId: string,
+  workspaceId: string | null,
   payload: NonNullable<AgentWebhookPayload["message"]>,
   fallbackOccurredAt: Date,
   transcriptId?: string,
@@ -264,6 +275,7 @@ async function upsertMessageEvent(
     where: { id: messageId },
     update: {
       agentId,
+      workspaceId,
       transcriptId,
       direction: payload.direction ?? "outbound",
       status: payload.status ?? "sent",
@@ -276,6 +288,7 @@ async function upsertMessageEvent(
     create: {
       id: messageId,
       agentId,
+      workspaceId,
       transcriptId,
       direction: payload.direction ?? "outbound",
       status: payload.status ?? "sent",
@@ -365,21 +378,23 @@ function inferSeverity(eventType: string, provided?: string): string {
 export async function ingestAgentWebhook(payload: AgentWebhookPayload) {
   const occurredAt = toDateOrNull(payload.occurredAt) ?? new Date();
   const agent = await ensureAgent(payload.agent, payload.channel);
+  const workspaceId = agent?.workspaceId ?? null;
 
-  const call = agent && payload.call ? await upsertCall(agent.id, payload.call, occurredAt) : null;
+  const call = agent && payload.call ? await upsertCall(agent.id, workspaceId, payload.call, occurredAt) : null;
   const transcript =
     agent && payload.channel && payload.transcript
-      ? await upsertTranscript(agent.id, payload.channel, payload.transcript, occurredAt, call?.id)
+      ? await upsertTranscript(agent.id, workspaceId, payload.channel, payload.transcript, occurredAt, call?.id)
       : null;
   const message =
     agent && payload.message
-      ? await upsertMessageEvent(agent.id, payload.message, occurredAt, transcript?.id)
+      ? await upsertMessageEvent(agent.id, workspaceId, payload.message, occurredAt, transcript?.id)
       : null;
   const knowledgeBase = payload.knowledgeBase ? await upsertKnowledgeBase(agent?.id ?? null, payload.knowledgeBase) : null;
 
   const agentEvent = await prisma.agentEvent.create({
     data: {
       id: payload.id ?? createPrefixedId("evt"),
+      workspaceId,
       eventType: payload.eventType,
       summary:
         payload.summary ??
